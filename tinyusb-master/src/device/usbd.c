@@ -616,7 +616,7 @@ void tud_task (void)
         TU_BREAKPOINT();
       break;
     }
-    xEventGroupSetBits(m_wdg_event_group, (1 << 2));
+//    xEventGroupSetBits(m_wdg_event_group, (1 << 2));
   }
 }
 

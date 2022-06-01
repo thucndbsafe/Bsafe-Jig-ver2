@@ -54,7 +54,7 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
-
+uint16_t toggle_100_ms = 0;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -109,7 +109,7 @@ int main(void)
   MX_UART5_Init();
   MX_USART2_UART_Init();
   MX_USART3_UART_Init();
-  MX_FATFS_Init();
+//  MX_FATFS_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
   m_lock_debug = xSemaphoreCreateMutex();
@@ -218,9 +218,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM2) {
     HAL_IncTick();
+    toggle_100_ms++;
   }
   /* USER CODE BEGIN Callback 1 */
-
+  if (toggle_100_ms == 100)
+    {
+  	  toggle_100_ms = 0;
+//  	  HAL_GPIO_TogglePin (ISO_IN1_GPIO_Port, ISO_IN1_Pin);
+  	  HAL_GPIO_TogglePin (BOTTON__GPIO_Port, BOTTON__Pin);
+  	  HAL_GPIO_TogglePin (MAIN_PW_GPIO_Port, MAIN_PW_Pin);
+  	  HAL_GPIO_TogglePin (PRE_PWR__GPIO_Port, PRE_PWR__Pin);
+  	  HAL_GPIO_TogglePin (ALARM_IN_GPIO_Port, ALARM_IN_Pin);
+//  	  HAL_GPIO_TogglePin (FAULT_IN_GPIO_Port, FAULT_IN_Pin);
+    }
   /* USER CODE END Callback 1 */
 }
 

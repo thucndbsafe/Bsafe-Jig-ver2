@@ -65,7 +65,7 @@ extern "C" {
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+extern uint32_t sys_get_ms(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -79,6 +79,8 @@ void Error_Handler(void);
 #define LED1_R_GPIO_Port GPIOC
 #define LED2_R_Pin GPIO_PIN_0
 #define LED2_R_GPIO_Port GPIOF
+#define WDI_Pin GPIO_PIN_9
+#define WDI_GPIO_Port GPIOF
 #define GD32_SDIO_Pin GPIO_PIN_3
 #define GD32_SDIO_GPIO_Port GPIOA
 #define BT_IN_Pin GPIO_PIN_4
@@ -107,8 +109,10 @@ void Error_Handler(void);
 #define SPI2_CS_GPIO_Port GPIOB
 #define RELAY_NC_Pin GPIO_PIN_8
 #define RELAY_NC_GPIO_Port GPIOD
+#define RELAY_NC_EXTI_IRQn EXTI9_5_IRQn
 #define RELAY_NO_Pin GPIO_PIN_9
 #define RELAY_NO_GPIO_Port GPIOD
+#define RELAY_NO_EXTI_IRQn EXTI9_5_IRQn
 #define PRE_PWR__Pin GPIO_PIN_10
 #define PRE_PWR__GPIO_Port GPIOD
 #define MAIN_PW_Pin GPIO_PIN_11

@@ -50,7 +50,7 @@
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN PFP */
 void rs232_rx_callback (void);
-void rs485_rxcallback (void);
+void rs485_rx_callback (void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -63,6 +63,7 @@ extern ETH_HandleTypeDef heth;
 extern PCD_HandleTypeDef hpcd_USB_OTG_FS;
 extern DMA_HandleTypeDef hdma_spi3_rx;
 extern DMA_HandleTypeDef hdma_spi3_tx;
+extern SPI_HandleTypeDef hspi3;
 extern TIM_HandleTypeDef htim2;
 
 /* USER CODE BEGIN EV */
@@ -187,7 +188,25 @@ void DMA1_Stream0_IRQHandler(void)
 void DMA1_Stream5_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Stream5_IRQn 0 */
-
+		if (LL_DMA_IsActiveFlag_HT5(DMA1))
+		{
+			LL_DMA_ClearFlag_HT5(DMA1);
+			usart2_rx_complete_callback(true);
+		}
+		if (LL_DMA_IsActiveFlag_TC5(DMA1))
+		{
+			LL_DMA_ClearFlag_TC5(DMA1);
+			/* Call function Reception complete Callback */
+			usart2_rx_complete_callback(true);
+			usart2_start_dma_rx();
+		}
+		else if (LL_DMA_IsActiveFlag_TE5(DMA1))
+		{
+			/* Call Error function */
+			DEBUG_ISR("USART2 Error\r\n");
+			usart2_rx_complete_callback(false);
+			// USART_TransferError_Callback();
+		}
   /* USER CODE END DMA1_Stream5_IRQn 0 */
 
   /* USER CODE BEGIN DMA1_Stream5_IRQn 1 */
@@ -201,12 +220,31 @@ void DMA1_Stream5_IRQHandler(void)
 void DMA1_Stream6_IRQHandler(void)
 {
   /* USER CODE BEGIN DMA1_Stream6_IRQn 0 */
-
+	if(LL_DMA_IsActiveFlag_TC6(DMA1))
+	{
+		LL_DMA_ClearFlag_TC6(DMA1);
+		usart2_tx_cplt_cb();
+	}
   /* USER CODE END DMA1_Stream6_IRQn 0 */
 
   /* USER CODE BEGIN DMA1_Stream6_IRQn 1 */
 
   /* USER CODE END DMA1_Stream6_IRQn 1 */
+}
+
+/**
+  * @brief This function handles EXTI line[9:5] interrupts.
+  */
+void EXTI9_5_IRQHandler(void)
+{
+  /* USER CODE BEGIN EXTI9_5_IRQn 0 */
+
+  /* USER CODE END EXTI9_5_IRQn 0 */
+  HAL_GPIO_EXTI_IRQHandler(RELAY_NC_Pin);
+  HAL_GPIO_EXTI_IRQHandler(RELAY_NO_Pin);
+  /* USER CODE BEGIN EXTI9_5_IRQn 1 */
+
+  /* USER CODE END EXTI9_5_IRQn 1 */
 }
 
 /**
@@ -229,11 +267,53 @@ void TIM2_IRQHandler(void)
 void USART2_IRQHandler(void)
 {
   /* USER CODE BEGIN USART2_IRQn 0 */
+	if (LL_USART_IsEnabledIT_IDLE(USART2) && LL_USART_IsActiveFlag_IDLE(USART2))
+		    {
+		        // DEBUG_ISR("IDLE\r\n");
+		        LL_USART_ClearFlag_IDLE(USART2);        /* Clear IDLE line flag */
+		        usart2_rx_complete_callback(true);
 
+		    }
+
+		    if (LL_USART_IsActiveFlag_ORE(USART2))
+		    {
+		        DEBUG_ISR("USART2 Overrun\r\n");
+		        uint32_t tmp = USART2->DR;
+		        (void)tmp;
+		        LL_USART_ClearFlag_ORE(USART2);
+		    }
+
+		    if (LL_USART_IsActiveFlag_FE(USART2))
+		    {
+		        DEBUG_ISR("USART2 Frame error\r\n");
+		        LL_USART_ClearFlag_FE(USART2);
+		    }
+
+		    if (LL_USART_IsActiveFlag_NE(USART2))
+		    {
+		        DEBUG_ISR("Noise error\r\n");
+		        LL_USART_ClearFlag_NE(USART2);
+		    }
   /* USER CODE END USART2_IRQn 0 */
   /* USER CODE BEGIN USART2_IRQn 1 */
 
   /* USER CODE END USART2_IRQn 1 */
+}
+
+/**
+  * @brief This function handles USART3 global interrupt.
+  */
+void USART3_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART3_IRQn 0 */
+	if((USART3 ->SR & (1 << 5)) && (USART3 ->CR1 & 1 << 5) ) //if rxne enable and be set
+	{
+		rs485_rx_callback();
+	}
+  /* USER CODE END USART3_IRQn 0 */
+  /* USER CODE BEGIN USART3_IRQn 1 */
+
+  /* USER CODE END USART3_IRQn 1 */
 }
 
 /**
@@ -248,6 +328,36 @@ void DMA1_Stream7_IRQHandler(void)
   /* USER CODE BEGIN DMA1_Stream7_IRQn 1 */
 
   /* USER CODE END DMA1_Stream7_IRQn 1 */
+}
+
+/**
+  * @brief This function handles SPI3 global interrupt.
+  */
+void SPI3_IRQHandler(void)
+{
+  /* USER CODE BEGIN SPI3_IRQn 0 */
+
+  /* USER CODE END SPI3_IRQn 0 */
+  HAL_SPI_IRQHandler(&hspi3);
+  /* USER CODE BEGIN SPI3_IRQn 1 */
+
+  /* USER CODE END SPI3_IRQn 1 */
+}
+
+/**
+  * @brief This function handles UART5 global interrupt.
+  */
+void UART5_IRQHandler(void)
+{
+  /* USER CODE BEGIN UART5_IRQn 0 */
+	if((UART5 ->SR & (1 << 5)) && (UART5 ->CR1 & 1 << 5) ) //if rxne enable and be set
+	{
+		rs232_rx_callback ();
+	}
+  /* USER CODE END UART5_IRQn 0 */
+  /* USER CODE BEGIN UART5_IRQn 1 */
+
+  /* USER CODE END UART5_IRQn 1 */
 }
 
 /**

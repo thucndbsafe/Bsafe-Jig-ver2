@@ -323,7 +323,7 @@ void app_spi_flash_direct_write_bytes(app_flash_drv_t *flash_drv, uint32_t addr,
     {
         return;
     }
-    DEBUG_INFO("Flash write page addr 0x%08X, size %u\r\n", addr, length);
+    DEBUG_VERBOSE("Flash write page addr 0x%08X, size %u\r\n", addr, length);
 
 
     flash_write_control(flash_drv, 1);
