@@ -32,7 +32,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdbool.h>
+#include "app_debug.h"
+#include "Segger_RTT.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,7 +61,11 @@
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
+uint32_t sys_get_ms(void);
+bool lock_debug(bool lock, uint32_t timeout_ms);
+uint32_t rtt_tx(const void *buffer, uint32_t size);
 
+static SemaphoreHandle_t m_lock_debug;
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -106,7 +112,10 @@ int main(void)
   MX_FATFS_Init();
   MX_SPI3_Init();
   /* USER CODE BEGIN 2 */
-
+  m_lock_debug = xSemaphoreCreateMutex();
+  xSemaphoreGive(m_lock_debug);
+  app_debug_init(sys_get_ms, lock_debug);
+  app_debug_register_callback_print(rtt_tx);
   /* USER CODE END 2 */
 
   /* Call init function for freertos objects (in freertos.c) */
@@ -176,7 +185,22 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
+uint32_t sys_get_ms(void)
+{
+    return HAL_GetTick();
+}
 
+bool lock_debug(bool lock, uint32_t timeout_ms)
+{
+	if (lock)
+		return xSemaphoreTake(m_lock_debug, timeout_ms);
+	xSemaphoreGive(m_lock_debug);
+	return true;
+}
+uint32_t rtt_tx(const void *buffer, uint32_t size)
+{
+    return SEGGER_RTT_Write(0, buffer, size);
+}
 /* USER CODE END 4 */
 
 /**

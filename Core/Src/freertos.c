@@ -25,7 +25,20 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "main.h"
+#include "lwip/init.h"
+#include "lwip/netif.h"
+#include "lwip/timeouts.h"
+#include "netif/etharp.h"
+#include "ethernetif.h"
+#include "app_ethernet.h"
+#include "app_debug.h"
+#include "lwip.h"
+#include "stdio.h"
+//#include "app_http.h"
+#include "lwip/dns.h"
+//#include "mqtt_client.h"
+#include "stdbool.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -45,6 +58,18 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
+
+
+/*********************       NET VAR    **********************************/
+	struct netif g_netif;
+	static TaskHandle_t m_task_handle_protocol = NULL; //NET APP TASK
+	osThreadId DHCP_id;
+	SemaphoreHandle_t hHttpStart;
+	xQueueHandle httpQueue;
+	bool send_offline_file = false;
+	SemaphoreHandle_t sent_an_offline_file;
+/*****************************************************************/
+
 
 /* USER CODE END Variables */
 osThreadId defaultTaskHandle;
@@ -123,29 +148,84 @@ void MX_FREERTOS_Init(void) {
 void StartDefaultTask(void const * argument)
 {
   /* init code for LWIP */
-  MX_LWIP_Init();
+//  MX_LWIP_Init();
 
   /* init code for USB_DEVICE */
   MX_USB_DEVICE_Init();
   /* USER CODE BEGIN StartDefaultTask */
   /* Infinite loop */
-
+  HAL_GPIO_WritePin (LED1_G_GPIO_Port,LED1_G_Pin,GPIO_PIN_RESET);
+  HAL_GPIO_WritePin (LED1_R_GPIO_Port,LED1_R_Pin,GPIO_PIN_SET);
+  HAL_GPIO_WritePin (LED2_G_GPIO_Port,LED2_G_Pin,GPIO_PIN_RESET);
+  HAL_GPIO_WritePin (LED2_R_GPIO_Port,LED2_R_Pin,GPIO_PIN_SET);
+  DEBUG_INFO ("TEST DEBUG OK \r\n");
+#if LWIP_DHCP
+	  /* Start DHCPClient */
+	  osThreadDef(DHCP, DHCP_Thread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE * 2);
+	  DHCP_id = osThreadCreate (osThread(DHCP), &g_netif);
+#endif
   for(;;)
   {
-	  HAL_GPIO_TogglePin (LED1_G_GPIO_Port, LED1_G_Pin);
-	  osDelay (100);
-	  HAL_GPIO_TogglePin (LED1_R_GPIO_Port, LED1_R_Pin);
-	  osDelay (100);
-	  HAL_GPIO_TogglePin (LED2_R_GPIO_Port, LED2_R_Pin);
-	  osDelay (100);
-	  HAL_GPIO_TogglePin (LED2_G_GPIO_Port, LED2_G_Pin);
-    osDelay(100);
+	  if (HAL_GPIO_ReadPin(BT_IN_GPIO_Port, BT_IN_Pin) == 0)
+	  {
+		  HAL_GPIO_TogglePin (LED1_G_GPIO_Port, LED1_G_Pin);
+		  HAL_GPIO_TogglePin (LED2_G_GPIO_Port, LED2_G_Pin);
+		  HAL_GPIO_TogglePin (LED1_R_GPIO_Port, LED1_R_Pin);
+		  HAL_GPIO_TogglePin (LED2_R_GPIO_Port, LED2_R_Pin);
+//		  HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
+//		vTaskDelay(1000);
+//		HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_RESET);
+	  }
+    osDelay(1);
   }
   /* USER CODE END StartDefaultTask */
 }
 
 /* Private application code --------------------------------------------------*/
 /* USER CODE BEGIN Application */
+void Netif_Config (bool restart)
+{
+	ip4_addr_t ipaddr;
+	ip4_addr_t netmask;
+	ip4_addr_t gw;
+	  /* IP addresses initialization with DHCP (IPv4) */
+	  ipaddr.addr = 0;
+	  netmask.addr = 0;
+	  gw.addr = 0;
+	  if (restart)
+	  {
+			netif_remove (&g_netif);
+			DEBUG_INFO ("NET IF REMOVE \r\n");
+	  /* Start DHCP negotiation for a network interface (IPv4) */
 
+//#if LWIP_DHCP
+//	  /* Start DHCPClient */
+//	  osThreadDef(DHCP, DHCP_Thread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE * 2);
+//	  DHCP_id = osThreadCreate (osThread(DHCP), &g_netif);
+//#endif
+	  }
+	  /* add the network interface (IPv4/IPv6) with RTOS */
+	  netif_add(&g_netif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init, &tcpip_input);//&tcpip_input =>null
+
+	  /* Registers the default network interface */
+	  netif_set_default(&g_netif);
+	  netif_set_link_callback(&g_netif, ethernet_link_status_updated);
+	  if (netif_is_link_up(&g_netif))
+	  {
+	    /* When the netif is fully configured this function must be called */
+	    netif_set_up(&g_netif);
+	  }
+	  else
+	  {
+	    /* When the netif link is down this function must be called */
+	    netif_set_down(&g_netif);
+	  }
+	  app_ethernet_notification(&g_netif);
+	  /* Set the link callback function, this function is called on change of link status*/
+
+
+	  DEBUG_INFO ("SET LINK CALLBACK \r\n");
+
+}
 /* USER CODE END Application */
 
