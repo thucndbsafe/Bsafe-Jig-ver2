@@ -83,14 +83,7 @@ esp_loader_error_t loader_port_serial_write(void *config, const uint8_t *data, u
 //			DEBUG_RAW("%s \r\n", hex_str);
 //	}
     (void)timeout;
-    if (0)//tmp->uart_addr)
-    {
-    	usart_send_bytes(tmp->uart_addr, (uint8_t *)data, size);
-    }
-    else if (tmp ->spi_addr)
-    {
-    	spi_send_bytes (tmp->spi_addr, (uint8_t*)data, size);
-    }
+    usart_send_bytes(tmp->uart_addr, (uint8_t *)data, size);
     return ESP_LOADER_SUCCESS;
 }
 
@@ -100,15 +93,8 @@ esp_loader_error_t loader_port_serial_read(void *config, uint8_t *data, uint16_t
     esp_loader_config_t *tmp = (esp_loader_config_t*)config;
     
     memset(data, 0x22, size);
-    HAL_StatusTypeDef err = HAL_ERROR;
-    if (0)
-    {
-    	err = (HAL_StatusTypeDef)usart_get_bytes(tmp->uart_addr, data, size, timeout);
-    }
-    else if (tmp->spi_addr)
-    {
-    	err = (HAL_StatusTypeDef)spi_get_bytes(tmp->uart_addr, data, size, timeout);
-    }
+
+    HAL_StatusTypeDef err = (HAL_StatusTypeDef)usart_get_bytes(tmp->uart_addr, data, size, timeout);
 //    serial_debug_print(data, size, false);
 //    DEBUG_INFO("SERIAL READING \r\n");
 //    uint8_t hex_str[3];

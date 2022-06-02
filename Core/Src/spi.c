@@ -24,7 +24,7 @@
 #include "app_spi_flash.h"
 #include "app_drv_spi.h"
 
-static app_flash_drv_t m_spi_flash_firm;
+//static app_flash_drv_t m_spi_flash_firm;
 
 
 /* USER CODE END 0 */
@@ -293,33 +293,33 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef* spiHandle)
 }
 
 /* USER CODE BEGIN 1 */
-void spi_flash_firm_init (SPI_HandleTypeDef * hspi)
-{
-	m_spi_flash_firm.spi = hspi;
-	m_spi_flash_firm.callback.spi_cs = app_drv_spi_cs;
-	m_spi_flash_firm.callback.spi_rx_buffer = app_drv_spi_receive_frame;
-	m_spi_flash_firm.callback.spi_tx_buffer = app_drv_spi_transmit_frame;
-	m_spi_flash_firm.callback.spi_tx_rx = app_drv_spi_transmit_receive_frame;
-	m_spi_flash_firm.callback.spi_tx_byte = app_drv_spi_transmit_byte;
-	m_spi_flash_firm.callback.delay_ms = NULL;
-}
+//void spi_flash_firm_init (SPI_HandleTypeDef * hspi)
+//{
+//	m_spi_flash_firm.spi = hspi;
+//	m_spi_flash_firm.callback.spi_cs = app_drv_spi_cs;
+//	m_spi_flash_firm.callback.spi_rx_buffer = app_drv_spi_receive_frame;
+//	m_spi_flash_firm.callback.spi_tx_buffer = app_drv_spi_transmit_frame;
+//	m_spi_flash_firm.callback.spi_tx_rx = app_drv_spi_transmit_receive_frame;
+//	m_spi_flash_firm.callback.spi_tx_byte = app_drv_spi_transmit_byte;
+//	m_spi_flash_firm.callback.delay_ms = NULL;
+//}
 
-void spi_send_bytes (uint32_t spi_addr, uint8_t *data, uint32_t size)
-{
-	if ((SPI_HandleTypeDef*)spi_addr == &hspi2)
-	{
-		m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 0);
-		m_spi_flash_firm.callback.spi_tx_buffer(m_spi_flash_firm.spi, data, size);
-		m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 1);
-	}
-}
-
-uint32_t spi_get_bytes (uint32_t uart_addr, uint8_t *data, uint32_t size, uint32_t timeout)
-{
-	m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 0);
-	m_spi_flash_firm.callback.spi_rx_buffer (m_spi_flash_firm.spi, data, size);
-	m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 1);
-	return HAL_OK;
-}
+//void spi_send_bytes (uint32_t spi_addr, uint8_t *data, uint32_t size)
+//{
+//	if ((SPI_HandleTypeDef*)spi_addr == &hspi2)
+//	{
+//		m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 0);
+//		m_spi_flash_firm.callback.spi_tx_buffer(m_spi_flash_firm.spi, data, size);
+//		m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 1);
+//	}
+//}
+//
+//uint32_t spi_get_bytes (uint32_t uart_addr, uint8_t *data, uint32_t size, uint32_t timeout)
+//{
+//	m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 0);
+//	m_spi_flash_firm.callback.spi_rx_buffer (m_spi_flash_firm.spi, data, size);
+//	m_spi_flash_firm.callback.spi_cs (m_spi_flash_firm.spi, 1);
+//	return HAL_OK;
+//}
 
 /* USER CODE END 1 */

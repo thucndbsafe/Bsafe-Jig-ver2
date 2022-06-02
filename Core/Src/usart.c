@@ -270,6 +270,7 @@ void MX_USART3_UART_Init(void)
   LL_USART_Enable(USART3);
   /* USER CODE BEGIN USART3_Init 2 */
   UART5 ->CR1 |= 1 << 5;
+  HAL_GPIO_WritePin (RS485_GPIO_Port, RS485_Pin, 1);
   /* USER CODE END USART3_Init 2 */
 
 }

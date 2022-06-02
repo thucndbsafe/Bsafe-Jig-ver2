@@ -64,6 +64,8 @@
 #include "iwdg.h"
 #include "ff.h"
 #include "spi.h"
+#include "app_spi_flash.h"
+#include "app_drv_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -847,7 +849,7 @@ void testing_task (void *arg)
 				ptr+=strlen("\"v3v3_min\":");
 				voltage_info.v3v3_min = utilities_get_number_from_string (0, ptr);
 			}
-			ptr = strstr((char*)V_info_buff, "\"v5v_max\":");
+//			ptr = strstr((char*)V_info_buff, "\"v5v_max\":");
 //			if (ptr)
 //			{
 //				ptr+=strlen("\"v5v_max\":");
@@ -885,10 +887,10 @@ void testing_task (void *arg)
 			}
 #warning "viet them ham tim ten va mat khau wifi"
 			DEBUG_INFO ("%d < vbat < %d (mV) \r\n", voltage_info.vbat_min, voltage_info.vbat_max);
-			DEBUG_INFO ("%d < v5v < %d (mV) \r\n", voltage_info.v5v_min, voltage_info.v5v_max);
+//			DEBUG_INFO ("%d < v5v < %d (mV) \r\n", voltage_info.v5v_min, voltage_info.v5v_max);
 			DEBUG_INFO ("%d < v1v8 < %d (mV) \r\n", voltage_info.v1v8_min, voltage_info.v1v8_max);
 			DEBUG_INFO ("%d < v3v3 < %d (mV) \r\n", voltage_info.v3v3_min, voltage_info.v3v3_max);
-			DEBUG_INFO ("%d < v4v2 < %d (mV) \r\n", voltage_info.v4v2_min, voltage_info.v4v2_max);
+//			DEBUG_INFO ("%d < v4v2 < %d (mV) \r\n", voltage_info.v4v2_min, voltage_info.v4v2_max);
 			DEBUG_INFO ("%d < vsys < %d (mV) \r\n", voltage_info.vsys_min, voltage_info.vsys_max);
 		}
 	}
@@ -910,13 +912,13 @@ void testing_task (void *arg)
 		}
 		if(1)//HAL_GPIO_ReadPin(MODE1_GPIO_Port, MODE1_Pin) && HAL_GPIO_ReadPin(MODE2_GPIO_Port, MODE2_Pin))//xet trang thai bit gat
 		{
-			DEBUG_INFO ("IN TEST MODE\r\n");
+			DEBUG_VERBOSE ("IN TEST MODE\r\n");
 			if(idle_detect)
 			{
 				idle_detect --;
 				if (idle_detect == 0)
 				{
-//					DEBUG_INFO ("RS485 SAY:\r\n %s", rs485ringBuffer);
+					DEBUG_INFO ("RS485 SAY:\r\n %s", rs485ringBuffer);
 					char * testptr = strstr((char*)rs485ringBuffer, "IN TEST MODE");
 					if (testptr)
 					{
@@ -1101,9 +1103,9 @@ void testing_task (void *arg)
 		}
 		else
 		{
-			DEBUG_INFO ("NOT IN TESTING MODE\r\n");
+			DEBUG_VERBOSE ("NOT IN TESTING MODE\r\n");
 		}
-		osDelay (100);
+		osDelay (200);
 //			uxBits = xEventGroupWaitBits(m_wdg_event_group,
 //				defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB,
 //										pdTRUE,
@@ -1211,7 +1213,7 @@ void flash_task(void *argument)
 	m_loader_cfg.spi_addr = (uint32_t)&hspi2;
 	if (m_loader_cfg.spi_addr)
 	{
-		spi_flash_firm_init (m_loader_cfg.spi_addr);
+		spi_flash_firm_init ((SPI_HandleTypeDef *)m_loader_cfg.spi_addr);
 	}
 	esp_loader_error_t err;
 
@@ -1390,7 +1392,143 @@ void flash_task(void *argument)
 }
 
 //*******************************************************************************************//
+void flashbyspi(void)
+{
+	for (;;)
+	{
+		if (m_disk_is_mounted)
+		{
+	//		vTaskDelay (200);
+			uint32_t file_size = fatfs_read_file(info_file, (uint8_t*)m_file_address, sizeof(m_file_address) - 1);
+			if (file_size > 0)
+			{
+				DEBUG_INFO ("READ THE INFO FILE \r\n");
+				/*
+				{
+					"boot":4096,
+					"firmware":65536,
+					"ota_data":2555904,
+					"partition":32768
+				}
+				*/
+				char *ptr = strstr(m_file_address, "\"boot\":");
+				if (ptr)
+				{
+					DEBUG_INFO ("FOUND THE BOOT STRING\r\n");
+					ptr += strlen("\"boot\":");
+					m_binary.boot.addr = utilities_get_number_from_string(0, ptr);
+				}
 
+				ptr = strstr(m_file_address, "\"firmware\":");
+				if (ptr)
+				{
+					ptr += strlen("\"firmware\":");
+					m_binary.firm.addr = utilities_get_number_from_string(0, ptr);
+				}
+				ptr = strstr(m_file_address, "\"ota_data\":");
+				if (ptr)
+				{
+					ptr += strlen("\"ota_data\":");
+					m_binary.ota.addr = utilities_get_number_from_string(0, ptr);
+				}
+				ptr = strstr(m_file_address, "\"partition\":");
+				if (ptr)
+				{
+					ptr += strlen("\"partition\":");
+					m_binary.part.addr = utilities_get_number_from_string(0, ptr);
+				}
+			}
+
+			file_size = fatfs_get_file_size(bootloader_file);
+			if (file_size > -1)
+			{
+				m_binary.boot.size = file_size;
+				m_binary.boot.file_name = bootloader_file;
+			}
+
+			file_size = fatfs_get_file_size(firmware_file);
+			if (file_size > -1)
+			{
+				m_binary.firm.size = file_size;
+				m_binary.firm.file_name = firmware_file;
+			}
+
+			file_size = fatfs_get_file_size(ota_file);
+			if (file_size > -1)
+			{
+				m_binary.ota.size = file_size;
+				m_binary.ota.file_name = ota_file;
+			}
+
+			file_size = fatfs_get_file_size(partition_file);
+			if (file_size > -1)
+			{
+				m_binary.part.size = file_size;
+				m_binary.part.file_name = partition_file;
+			}
+
+			DEBUG_INFO("Bootloader offset 0x%08X, firmware 0x%08X, ota  0x%08X, partition table 0x%08X\r\n", m_binary.boot.addr, m_binary.firm.addr, m_binary.ota.addr, m_binary.part.addr);
+			DEBUG_INFO("Bootloader %u bytes, firmware %u bytes, ota %u bytes, partition table %u bytes\r\n", m_binary.boot.size, m_binary.firm.size, m_binary.ota.size, m_binary.part.size);
+		}
+		m_loader_cfg.gpio0_trigger_port = (uint32_t)ESP_IO0_GPIO_Port;
+		m_loader_cfg.reset_trigger_port = (uint32_t)ESP_EN_GPIO_Port;
+		static app_flash_drv_t m_spi_flash_firm;
+		if (m_loader_cfg.spi_addr)
+		{
+			m_spi_flash_firm.spi = &hspi2;
+			m_spi_flash_firm.callback.spi_cs = app_drv_spi_cs;
+			m_spi_flash_firm.callback.spi_rx_buffer = app_drv_spi_receive_frame;
+			m_spi_flash_firm.callback.spi_tx_buffer = app_drv_spi_transmit_frame;
+			m_spi_flash_firm.callback.spi_tx_rx = app_drv_spi_transmit_receive_frame;
+			m_spi_flash_firm.callback.spi_tx_byte = app_drv_spi_transmit_byte;
+			m_spi_flash_firm.callback.delay_ms = NULL;
+		}
+		uint32_t now = xTaskGetTickCount();
+		uint32_t retry = 4;
+		// set reset pin to 0
+		HAL_GPIO_WritePin (m_loader_cfg.reset_trigger_port, m_loader_cfg.reset_trigger_pin, GPIO_PIN_RESET);
+		// init flash size esp
+		while (m_binary.part.size > 0
+				&& m_binary.firm.size > 0
+				&& m_binary.ota.size >0
+				&& m_binary.part.size > 0
+				)
+		{
+			if (retry == 0)
+			{
+				break;
+			}
+			retry--;
+			DEBUG_INFO ("FLASH BOOT FILE BY SPI\r\n");
+			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.boot.addr/APP_SPI_FLASH_SECTOR_SIZE));
+			m_binary.boot.data = (uint8_t *)pvPortMalloc (m_binary.boot.size * sizeof(uint8_t));
+			app_spi_flash_write (&m_spi_flash_firm, m_binary.boot.addr, m_binary.boot.data, m_binary.boot.size);
+			vPortFree (m_binary.boot.data);
+			DEBUG_INFO ("FLASHED BOOT FILE\r\n");
+			DEBUG_INFO ("FLASH FIRMWARE FILE BY SPI\r\n");
+			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.firm.addr/APP_SPI_FLASH_SECTOR_SIZE));
+			m_binary.firm.data = (uint8_t *)pvPortMalloc (m_binary.firm.size * sizeof(uint8_t));
+			app_spi_flash_write (&m_spi_flash_firm, m_binary.firm.addr, m_binary.firm.data, m_binary.firm.size);
+			vPortFree (m_binary.firm.data);
+			DEBUG_INFO ("FLASHED FIRMWARE FILE \r\n");
+			DEBUG_INFO ("FLASH OTA FILE BY SPI\r\n");
+			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.ota.addr/APP_SPI_FLASH_SECTOR_SIZE));
+			m_binary.ota.data = (uint8_t *)pvPortMalloc (m_binary.ota.size * sizeof(uint8_t));
+			app_spi_flash_write (&m_spi_flash_firm, m_binary.ota.addr, m_binary.ota.data, m_binary.ota.size);
+			vPortFree (m_binary.ota.data);
+			DEBUG_INFO ("FLASHED OTA FILE \r\n");
+			DEBUG_INFO ("FLASH OTA FILE BY SPI\r\n");
+			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.part.addr/APP_SPI_FLASH_SECTOR_SIZE));
+			m_binary.part.data = (uint8_t *)pvPortMalloc (m_binary.part.size * sizeof(uint8_t));
+			app_spi_flash_write (&m_spi_flash_firm, m_binary.part.addr, m_binary.part.data, m_binary.part.size);
+			vPortFree (m_binary.part.data);
+			DEBUG_INFO ("FLASHED OTA FILE \r\n");
+
+
+		}
+
+	}
+}
 
 
 
@@ -1416,24 +1554,24 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
   /* NOTE: This function Should not be modified, when the callback is needed,
            the HAL_GPIO_EXTI_Callback could be implemented in the user file
    */
-//  if (GPIO_Pin == RELAY_NO_Pin)
-//  {
-//	  relay_toggle_0 ++;
-//	  if (relay_toggle_0 > 5)
-//	  {
-//		  test_res.result.relay0_ok = 1;
-//		  relay_toggle_0 = 0;
-//	  }
-//  }
-//  else if (GPIO_Pin == RELAY_NC_Pin)
-//  {
-//	  relay_toggle_0 ++;
-//	  if (relay_toggle_1 > 5)
-//	  {
-//		  relay_toggle_1 = 0;
-//		  test_res.result.relay1_ok = 1;
-//	  }
-//  }
+  if (GPIO_Pin == RELAY_NO_Pin)
+  {
+	  relay_toggle_0 ++;
+	  if (relay_toggle_0 > 5)
+	  {
+		  test_res.result.relay0_ok = 1;
+		  relay_toggle_0 = 0;
+	  }
+  }
+  else if (GPIO_Pin == RELAY_NC_Pin)
+  {
+	  relay_toggle_0 ++;
+	  if (relay_toggle_1 > 5)
+	  {
+		  relay_toggle_1 = 0;
+		  test_res.result.relay1_ok = 1;
+	  }
+  }
 }
 //********************************************************************//
 
@@ -1487,17 +1625,17 @@ void volTest(void)
 	DEBUG_VERBOSE ("VOL TESTING ENTER \r\n");
 	uint8_t res_cnt;
 	uint16_t VolRes[4];
-	for (uint8_t i = 0; i < 6; i ++)
+	for (uint8_t i = 0; i < 4; i ++)
 	{
 		VolRes [i] = (ADCScan[i]*3300/4095);
 		VolRes [i] = VolRes[i] *2;
 	}
-	DEBUG_VERBOSE ("V4V2 : %d mV\r\n", VolRes [0]);
-	DEBUG_VERBOSE ("VBAT : %d mV\r\n", VolRes [1]);
-	DEBUG_VERBOSE ("V5v : %d mV\r\n", VolRes [2]);
-	DEBUG_VERBOSE ("V3v3 : %d mV\r\n", VolRes [3]);
-	DEBUG_VERBOSE ("V1v8 : %d mV\r\n", VolRes [4]);
-	DEBUG_VERBOSE ("Vsys : %d mV\r\n", VolRes [5]);
+	DEBUG_INFO ("VSYS : %d mV\r\n", VolRes [0]);
+	DEBUG_INFO ("3V3 : %d mV\r\n", VolRes [1]);
+	DEBUG_INFO ("V5v : %d mV\r\n", VolRes [2]);
+	DEBUG_INFO ("V3v3 : %d mV\r\n", VolRes [3]);
+//	DEBUG_INFO ("V1v8 : %d mV\r\n", VolRes [4]);
+//	DEBUG_INFO ("Vsys : %d mV\r\n", VolRes [5]);`
 	res_cnt = 0;
 //	if (voltage_info.v4v2_min <= VolRes[0] && VolRes[0] <= voltage_info.v4v2_max)
 //	{
@@ -1557,11 +1695,11 @@ void volTest(void)
 	if (res_cnt == 6)
 	{
 //		return true;
-		DEBUG_VERBOSE ("VOLTAGE OK\r\n");
+		DEBUG_INFO ("VOLTAGE OK\r\n");
 	}
 	else
 	{
-		DEBUG_VERBOSE ("VOLTAGE FAIL \r\n");
+		DEBUG_INFO ("VOLTAGE FAIL \r\n");
 	}
 //	return false;
 }
@@ -1571,22 +1709,22 @@ bool PassTest (jig_value_t * value)
 	if (strlen (value->gsm_imei) >= 15)
 	{
 		test_res.result.sim_ok = 1;
-		DEBUG_VERBOSE ("SIM OK \r\n");
+		DEBUG_INFO ("SIM OK \r\n");
 	}
 	else
 	{
 		test_res.result.sim_ok = 0;
-		DEBUG_VERBOSE ("SIM NOT OK \r\n");
+		DEBUG_INFO ("SIM NOT OK \r\n");
 	}
 	if (25 <= value->temperature && value->temperature <=50)
 	{
 		test_res.result.temper_ok = 1;
-		DEBUG_VERBOSE ("TEMPER IS OK \r\n");
+		DEBUG_INFO ("TEMPER IS OK \r\n");
 	}
 	else
 	{
 		test_res.result.temper_ok = 0;
-		DEBUG_VERBOSE ("TEMPER IS not OK \r\n");
+		DEBUG_INFO ("TEMPER IS not OK \r\n");
 	}
 	if (test_res.result.rs232
 		&& test_res.result.rs485
@@ -1602,7 +1740,7 @@ bool PassTest (jig_value_t * value)
 		)
 	{
 		allPassed = true;
-		DEBUG_VERBOSE ("ALL TEST RESULT PASS \r\n");
+		DEBUG_INFO ("ALL TEST RESULT PASS \r\n");
 		return true;
 	}
 	else

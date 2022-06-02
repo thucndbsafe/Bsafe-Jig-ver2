@@ -222,7 +222,7 @@ static err_t http_post_make_body_from_file(httpc_state_t *connection, void *arg,
 			DEBUG_INFO ("LAST POS NOW IS %u\r\n",last_pos);
     	}
 
-    	end:
+//    	end:
     return ERR_OK;
 }
 /**
