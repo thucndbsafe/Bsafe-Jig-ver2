@@ -63,6 +63,7 @@
 #include "app_cli.h"
 #include "iwdg.h"
 #include "ff.h"
+#include "spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -97,7 +98,7 @@ typedef union
 		uint32_t vbat_ok: 1;
 		uint32_t v1v8_ok: 1;
 		uint32_t v3v3_ok: 1;
-		uint32_t v5v_ok: 1;
+//		uint32_t v5v_ok: 1;
 		uint32_t vgsm4v2_ok: 1;
 		uint32_t charge_ok: 1;
 		uint32_t alarm_ok:1;
@@ -312,9 +313,21 @@ static EventBits_t uxBits;
 	uint8_t relay_toggle_1;
 	bool ready_send_to_sever = false;
 	// adc read var
-	uint16_t ADCScan[6];
+	uint16_t ADCScan[4];
 	uint8_t idle_detect;
 //*****************************************************************************//
+
+//********************************* MIN PROTOCOL VAR**********************//
+	lwrb_t m_ringbuffer_host_rx;
+	uint8_t m_rs232_host_buffer[512];
+	static uint8_t m_min_rx_buffer[256];
+	static min_context_t m_min_context;
+	static min_frame_cfg_t m_min_setting = MIN_DEFAULT_CONFIG();
+//*******************************************************************//
+	// ******************** RING BUFFER********************************//
+	uint8_t rs485ringBuffer [256];
+	lwrb_t m_ringbuffer_rs485_rx;
+//******************************************************************//
 
 //************************* TIME PROTOCOL PRO AND VAR***********************************//
 	void lwip_sntp_recv_cb (uint32_t time);
@@ -339,11 +352,69 @@ osThreadId defaultTaskHandle;
 void cdc_task(void* params);
 
 void usb_task (void* params);
+
+void flash_task(void *argument);
+
+void testing_task (void *arg);
+
 //***************************************************************************************************************//
 
+// ****************************************** RTC PFP****************************************************************//
 void reInitRTC ( RTC_TimeTypeDef sTime, RTC_DateTypeDef sDate);
 
 static void initialize_stnp(void);
+
+static uint32_t convert_date_time_to_second(date_time_t *t);
+
+static void convert_second_to_date_time(uint32_t sec, date_time_t *t, uint8_t Calyear);
+//*******************************************************************************************************************//
+
+/*************************************      BUTTON FP          *********************************************************/
+void button_initialize(uint32_t button_num);
+
+uint32_t btn_read(uint32_t pin);
+
+void on_btn_pressed(int number, int event, void * pData);
+
+void on_btn_release(int number, int event, void * pData);
+
+void on_btn_hold(int number, int event, void * pData);
+
+static void on_btn_hold_so_long(int index, int event, void * pData);
+/************************************************************************************************************************/
+
+//*******************************************  ETHERNET PFP      ********************************************************/
+void Netif_Config (bool restart);
+void net_task(void *argument);
+
+/***********************************************************************************************************************/
+
+//************************************  TEST PROTOTYPE    **************************************************************//
+
+int16_t json_build(jig_value_t *value, func_test_t * test, char *json_str);
+
+void Get_test_result (jig_value_t * value, jig_peripheral_t* peripheral);
+
+//void make_string_from_mac(char* str);
+void min_rx_callback (void *min_context , min_msg_t *frame);
+
+bool RS232_tx (void *ctx, uint8_t byte);
+
+void volTest(void);
+
+bool PassTest (jig_value_t * value);
+
+void send_test_command(min_msg_t * test_command);
+
+bool RS232_tx (void *ctx, uint8_t byte);
+
+void Get_sim_imei(jig_value_t * value, char *sim_imei);
+
+void Get_gsm_imei(jig_value_t * value, char *gsm_imei);
+
+void Get_MAC(jig_value_t * value, uint8_t *MAC);
+//********************************************************************************************************************//
+
 /* USER CODE END FunctionPrototypes */
 
 void StartDefaultTask(void const * argument);
@@ -477,9 +548,33 @@ void StartDefaultTask(void const * argument)
 		f_setlabel("BSAFE JIG");
 	  }
 //***********************************************************************//
+
+//*************************** INIT BUTTON APP**********************//
+		app_btn_config_t btn_conf;
+		btn_conf.config = m_button_cfg;
+		btn_conf.btn_count = 1;
+		btn_conf.get_tick_cb = xTaskGetTickCount;
+		btn_conf.btn_initialize = button_initialize;
+		btn_conf.btn_read = btn_read;
+		btn_conf.scan_interval_ms = 50;
+		app_btn_initialize(&btn_conf);
+		//    app_btn_initialize(&btn_conf);
+		app_btn_register_callback(APP_BTN_EVT_HOLD, on_btn_hold, NULL);
+		app_btn_register_callback(APP_BTN_EVT_HOLD_SO_LONG, on_btn_hold_so_long, NULL);
+		app_btn_register_callback(APP_BTN_EVT_PRESSED, on_btn_pressed, NULL);
+		app_btn_register_callback(APP_BTN_EVT_RELEASED, on_btn_release, NULL);
+
+		m_button_event_group = xEventGroupCreate(); //>>>>>>> CREATE BUTTON EVENT VAR
+
+//************************* INIT BUTTON END **********************//
+		 m_wdg_event_group = xEventGroupCreate();	  // creat group of wdt
+
+
+		HAL_ADC_Start_DMA (&hadc1, (uint32_t*)ADCScan, 4); //>>>Start ADC
+		vTaskDelay(500);
   /* Infinite loop */
 
-
+		 httpQueue = xQueueCreate (1, sizeof(uint32_t));
 #if LWIP_DHCP
 	  /* Start DHCPClient */
 	  osThreadDef(DHCP, DHCP_Thread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE * 2);
@@ -489,21 +584,32 @@ void StartDefaultTask(void const * argument)
 	  {
 		  xTaskCreate(usb_task, "usb_task", 512, NULL, 4, &m_USB_handle);// pio =1
 	  }
+	  if (mTest_Handle_t == NULL)
+	  {
+		  xTaskCreate (testing_task, "testing_task", 1024, NULL, 5, &mTest_Handle_t);
+	  }
 	  osDelay (200);
 	  initialize_stnp();
   for(;;)
   {
-	  if (HAL_GPIO_ReadPin(BT_IN_GPIO_Port, BT_IN_Pin) == 0)
-	  {
-		  HAL_GPIO_TogglePin (LED1_G_GPIO_Port, LED1_G_Pin);
-		  HAL_GPIO_TogglePin (LED2_G_GPIO_Port, LED2_G_Pin);
-		  HAL_GPIO_TogglePin (LED1_R_GPIO_Port, LED1_R_Pin);
-		  HAL_GPIO_TogglePin (LED2_R_GPIO_Port, LED2_R_Pin);
-//		  HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
-//		vTaskDelay(1000);
-//		HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_RESET);
-	  }
-    osDelay(10);
+	  app_btn_scan(NULL);
+//	  if(HAL_GPIO_ReadPin (MODE1_GPIO_Port, MODE1_Pin))
+//	  {
+//		  DEBUG_INFO ("NOW MODE 1 IS 1\r\n");
+//	  }
+//	  else
+//	  {
+//		  DEBUG_INFO ("NOW MODE 1 IS 0\r\n");
+//	  }
+//	  if(HAL_GPIO_ReadPin (MODE2_GPIO_Port, MODE2_Pin))
+//	  	  {
+//	  		  DEBUG_INFO ("NOW MODE 2 IS 1\r\n");
+//	  	  }
+//	  	  else
+//	  	  {
+//	  		  DEBUG_INFO ("NOW MODE 2 IS 0\r\n");
+//	  	  }
+    osDelay(100);
   }
   /* USER CODE END StartDefaultTask */
 }
@@ -611,7 +717,9 @@ void cdc_task(void* params)
 		vTaskDelay(pdMS_TO_TICKS(1));
 	}
 }
-/**********************************************************************/
+//*************************************************************************************************************************/
+
+//*****************************************  ETHERNET TASKING ***********************************************************//
 void Netif_Config (bool restart)
 {
 	ip4_addr_t ipaddr;
@@ -627,11 +735,7 @@ void Netif_Config (bool restart)
 			DEBUG_INFO ("NET IF REMOVE \r\n");
 	  /* Start DHCP negotiation for a network interface (IPv4) */
 
-//#if LWIP_DHCP
-//	  /* Start DHCPClient */
-//	  osThreadDef(DHCP, DHCP_Thread, osPriorityBelowNormal, 0, configMINIMAL_STACK_SIZE * 2);
-//	  DHCP_id = osThreadCreate (osThread(DHCP), &g_netif);
-//#endif
+
 	  }
 	  /* add the network interface (IPv4/IPv6) with RTOS */
 	  netif_add(&g_netif, &ipaddr, &netmask, &gw, NULL, &ethernetif_init, &tcpip_input);//&tcpip_input =>null
@@ -656,19 +760,653 @@ void Netif_Config (bool restart)
 	  DEBUG_INFO ("SET LINK CALLBACK \r\n");
 
 }
+
+
+
+//*********************************** TEST TASK******************************************************//
+
+void testing_task (void *arg)
+{
+	//init min protocol
+	lwrb_init (&m_ringbuffer_rs485_rx, &rs485ringBuffer, sizeof (rs485ringBuffer));
+	lwrb_init (&m_ringbuffer_host_rx, &m_rs232_host_buffer, sizeof (m_rs232_host_buffer));
+	m_min_setting.get_ms = sys_get_ms;
+	m_min_setting.last_rx_time = 0x00;
+	m_min_setting.rx_callback = min_rx_callback;
+	m_min_setting.timeout_not_seen_rx = 5000;
+	m_min_setting.tx_byte = RS232_tx;
+	m_min_setting.use_timeout_method = 1;
+
+	m_min_context.callback = &m_min_setting;
+	m_min_context.rx_frame_payload_buf = m_min_rx_buffer;
+	min_init_context(&m_min_context);
+	uint32_t last_tick = 0;
+	uint32_t last_tick_time_out = 0;
+	uint32_t last_vol_tick = 0;
+//	uint32_t json_len;
+	const min_msg_t test_cmd =
+	{
+			.id = MIN_ID_RS232_ENTER_TEST_MODE,
+			.len = 0,
+			.payload = NULL
+	};
+	const min_msg_t reset_cmd_wd =
+	{
+			.id = MIN_ID_TEST_WATCHDOG,
+			.len = 0,
+			.payload = NULL
+	};
+	if (m_disk_is_mounted)
+	{
+		DEBUG_VERBOSE ("READ VOLTAGE CONFIG FILE\r\n");
+		uint32_t file_size = fatfs_read_file(test_info_file, (uint8_t*)V_info_buff, sizeof(V_info_buff) - 1);
+		/*
+		 * {vbatmax:4.3,
+		 * 	vbatmin:4.5,
+		 *
+		 *
+		 * }
+		 * */
+		DEBUG_VERBOSE ("READ %d byte size\r\n", file_size);
+		DEBUG_VERBOSE ("%s", V_info_buff);
+		if (file_size > 0)
+		{
+			char *ptr = strstr((char*)V_info_buff, "\"vbat_max\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"vbat_max\":");
+				voltage_info.vbat_max = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff,"\"vbat_min\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"vbat_min\":");
+				voltage_info.vbat_min = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff, "\"v1v8_max\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"v1v8_max\":");
+				voltage_info.v1v8_max = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff, "\"v1v8_min\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"v1v8_min\":");
+				voltage_info.v1v8_min = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff, "\"v3v3_max\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"v3v3_max\":");
+				voltage_info.v3v3_max = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff, "\"v3v3_min\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"v3v3_min\":");
+				voltage_info.v3v3_min = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff, "\"v5v_max\":");
+//			if (ptr)
+//			{
+//				ptr+=strlen("\"v5v_max\":");
+//				voltage_info.v5v_max = utilities_get_number_from_string (0, ptr);
+//			}
+//			ptr = strstr((char*)V_info_buff, "\"v5v_min\":");
+//			if (ptr)
+//			{
+//				ptr+=strlen("\"v5v_min\":");
+//				voltage_info.v5v_min = utilities_get_number_from_string (0, ptr);
+//			}
+//			ptr = strstr((char*)V_info_buff, "\"v4v2_max\":");
+//			if (ptr)
+//			{
+//				ptr+=strlen("\"v4v2_max\":");
+//				voltage_info.v4v2_max = utilities_get_number_from_string (0, ptr);
+//			}
+//			ptr = strstr((char*)V_info_buff, "\"v4v2_min\":");
+//			if (ptr)
+//			{
+//				ptr+=strlen("\"v4v2_min\":");
+//				voltage_info.v4v2_min = utilities_get_number_from_string (0, ptr);
+//			}
+			ptr = strstr((char*)V_info_buff, "\"vsys_max\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"vsys_max\":");
+				voltage_info.vsys_max = utilities_get_number_from_string (0, ptr);
+			}
+			ptr = strstr((char*)V_info_buff, "\"vsys_min\":");
+			if (ptr)
+			{
+				ptr+=strlen("\"vsys_min\":");
+				voltage_info.vsys_min = utilities_get_number_from_string (0, ptr);
+			}
+#warning "viet them ham tim ten va mat khau wifi"
+			DEBUG_INFO ("%d < vbat < %d (mV) \r\n", voltage_info.vbat_min, voltage_info.vbat_max);
+			DEBUG_INFO ("%d < v5v < %d (mV) \r\n", voltage_info.v5v_min, voltage_info.v5v_max);
+			DEBUG_INFO ("%d < v1v8 < %d (mV) \r\n", voltage_info.v1v8_min, voltage_info.v1v8_max);
+			DEBUG_INFO ("%d < v3v3 < %d (mV) \r\n", voltage_info.v3v3_min, voltage_info.v3v3_max);
+			DEBUG_INFO ("%d < v4v2 < %d (mV) \r\n", voltage_info.v4v2_min, voltage_info.v4v2_max);
+			DEBUG_INFO ("%d < vsys < %d (mV) \r\n", voltage_info.vsys_min, voltage_info.vsys_max);
+		}
+	}
+	bool sent_to_sever =false;
+//	send_test_command (&test_cmd);
+	for (;;)
+	{
+//		DEBUG_INFO ("ENTER TESTING LOOP \r\n");
+		uint32_t now = HAL_GetTick();
+		uint8_t ch;
+		if (lwrb_read(&m_ringbuffer_host_rx, &ch, 1))
+		{
+			min_rx_feed(&m_min_context, &ch, 1);
+		}
+		else
+		{
+
+			min_timeout_poll(&m_min_context);
+		}
+		if(1)//HAL_GPIO_ReadPin(MODE1_GPIO_Port, MODE1_Pin) && HAL_GPIO_ReadPin(MODE2_GPIO_Port, MODE2_Pin))//xet trang thai bit gat
+		{
+			DEBUG_INFO ("IN TEST MODE\r\n");
+			if(idle_detect)
+			{
+				idle_detect --;
+				if (idle_detect == 0)
+				{
+//					DEBUG_INFO ("RS485 SAY:\r\n %s", rs485ringBuffer);
+					char * testptr = strstr((char*)rs485ringBuffer, "IN TEST MODE");
+					if (testptr)
+					{
+						test_res.result.rs485 = true;
+					}
+				}
+			}
+
+			if (get_jig_info)
+			{
+					DEBUG_INFO ("GET EOF START CHECK MAC \r\n");
+					if (strcmp((char*)MAC, (char*)lastMAC) != 0 )
+					{
+						ready_send_to_sever = false;
+						sent_to_sever =false;
+						test_res.result.rs485 = 0;
+						relay_toggle_0 = 0;
+						relay_toggle_1 = 0;
+						allPassed = 0;
+						test_res.result.relay0_ok = 0;
+						test_res.result.relay1_ok = 0;
+						DEBUG_INFO ("MAC CHANGED: %02x: %02x: %02x: %02x: %02x: %02x\r\n", MAC[0], MAC[1], MAC[2], MAC[3], MAC[4],MAC[5]);
+						to_send_value = rx_value;
+						if (((to_send_value ->peripheral.value) == 0xFFFF) && (test_res.result.test_wd_ok != 1))
+						{
+							send_test_command ((min_msg_t *)&reset_cmd_wd);
+						}
+					}
+					else
+					{
+
+						DEBUG_WARN ("MAC STILL THE SAME, UPDATE \r\n");
+						if (allPassed)
+						{
+							break;
+						}
+						if (rx_value ->temperature)
+						{
+							to_send_value ->temperature = rx_value ->temperature;
+						}
+						if (rx_value->peripheral.name.eth != 1)
+						{
+							to_send_value->peripheral.name.eth = rx_value ->peripheral.name.eth;
+						}
+						if (rx_value ->peripheral.name.wifi  != 1)
+						{
+							to_send_value ->peripheral.name.wifi  = rx_value ->peripheral.name.wifi ;
+						}
+						if (rx_value ->peripheral.name.gsm  != 1)
+						{
+							to_send_value ->peripheral.name.gsm  = rx_value ->peripheral.name.gsm ;
+						}
+						if (rx_value ->peripheral.name.server  != 1)
+						{
+							to_send_value ->peripheral.name.server  = rx_value ->peripheral.name.server ;
+						}
+						if (rx_value ->peripheral.name.input0_pass  != 1)
+						{
+							to_send_value ->peripheral.name.input0_pass  = rx_value ->peripheral.name.input0_pass ;
+						}
+						if (rx_value ->peripheral.name.input1_pass  != 1)
+						{
+							to_send_value ->peripheral.name.input1_pass  = rx_value ->peripheral.name.input1_pass ;
+						}
+						if (rx_value ->peripheral.name.input2_pass  != 1)
+						{
+							to_send_value ->peripheral.name.input2_pass  = rx_value ->peripheral.name.input2_pass ;
+						}
+						if (rx_value ->peripheral.name.input3_pass  != 1)
+						{
+							to_send_value ->peripheral.name.input3_pass  = rx_value ->peripheral.name.input3_pass ;
+						}
+						if (rx_value ->peripheral.name.button_pass   != 1)
+						{
+							to_send_value ->peripheral.name.button_pass   = rx_value ->peripheral.name.button_pass  ;
+						}
+						if (rx_value ->peripheral.name.main_power_pass   != 1)
+						{
+							to_send_value ->peripheral.name.main_power_pass   = rx_value ->peripheral.name.main_power_pass  ;
+						}
+						if (rx_value ->peripheral.name.backup_power_pass   != 1)
+						{
+							to_send_value ->peripheral.name.backup_power_pass   = rx_value ->peripheral.name.backup_power_pass  ;
+						}
+
+						if (((to_send_value ->peripheral.value) == 0xFFFF) && (test_res.result.test_wd_ok != 1))
+						{
+							send_test_command ((min_msg_t *)&reset_cmd_wd);
+						}
+						if (PassTest(to_send_value))
+						{
+
+							ready_send_to_sever = true;
+							sent_to_sever = false;
+							DEBUG_INFO ("NOW PASSED SEND AGAIN \r\n");
+						}
+					}
+					for (uint8_t i = 0; i < 6; i++)
+					{
+						lastMAC[i] = MAC[i];
+					}
+				if (PassTest(to_send_value))
+				{
+					DEBUG_INFO ("PASSED ALL TESTS \r\n");
+//					json_len = json_build (to_send_value, &test_res, json_send_to_sever);
+					ready_send_to_sever = true;
+				}
+				else
+				{
+					if ((now - last_tick_time_out) > TIMEOUT)
+					{
+//						send_json_to_sever();// ban bang queue
+//						json_len = json_build (to_send_value, &test_res, json_send_to_sever);
+//						DEBUG_INFO ("JSON STRING: %s\r\n", json_send_to_sever);
+						DEBUG_INFO ("TIME OUT PREPARE TO SEND \r\n");
+						ready_send_to_sever = true;
+						last_tick_time_out = now;
+
+					}
+				}
+				get_jig_info = false;
+			}
+//			else
+//			{
+//				if ((now - last_tick_time_out) > TIMEOUT)
+//				{
+////						send_json_to_sever();// ban bang queue
+////						json_len = json_build (to_send_value, &test_res, json_send_to_sever);
+////						DEBUG_INFO ("JSON STRING: %s\r\n", json_send_to_sever);
+//					DEBUG_INFO ("TIME OUT PREPARE TO SEND \r\n");
+//					test_res.result.rs232 = 0;
+//					ready_send_to_sever = true;
+//					last_tick_time_out = now;
+//
+//				}
+//			}
+			// THEM TRUONG HOP MACH MAIN KHONG TRUYEN TIN QUA RS232
+
+			if (ready_send_to_sever && (sent_to_sever == false))
+			{
+				date_time_t date_time_buff;
+				sent_to_sever = true;
+				jig_value_t* buff_jig_var;
+				buff_jig_var = (jig_value_t *) pvPortMalloc(sizeof (jig_value_t));
+
+				HAL_RTC_GetTime (&hrtc, &sTimeToSend, RTC_FORMAT_BIN);
+				HAL_RTC_GetDate (&hrtc, &sDateToSend, RTC_FORMAT_BIN);
+				date_time_buff.day = sDateToSend.Date;
+				date_time_buff.month = sDateToSend.Month;
+				date_time_buff.year = sDateToSend.Year;
+				date_time_buff.hour = sTimeToSend.Hours - 7;
+				date_time_buff.minute = sTimeToSend.Minutes;
+				date_time_buff.second = sTimeToSend.Seconds;
+				buff_jig_var->timestamp = convert_date_time_to_second (&date_time_buff);
+				buff_jig_var->timestamp += 946684800; // add time from 1970 to 2000
+				DEBUG_INFO ("GET TIME: %d: %d: %d \r\n", (uint8_t)(sTimeToSend.Hours), (uint8_t)(sTimeToSend.Minutes),(uint8_t)(sTimeToSend.Seconds));
+				DEBUG_INFO ("GET date: %d: %d: %d \r\n", (uint8_t)(sDateToSend.Date), (uint8_t)(sDateToSend.Month),(uint8_t)(sDateToSend.Year));
+				DEBUG_WARN ("CALCULATED TIME : %u\r\n", buff_jig_var->timestamp);
+
+				buff_jig_var->device_type = to_send_value->device_type;
+				memcpy (buff_jig_var->fw_version, to_send_value->fw_version, 3);
+				memcpy (buff_jig_var->hw_version, to_send_value->hw_version, 3);
+				memcpy (buff_jig_var->gsm_imei, to_send_value->gsm_imei, 16);
+				memcpy (buff_jig_var->mac, to_send_value->mac, 6);
+				memcpy (buff_jig_var->sim_imei, to_send_value->sim_imei, 16);
+				buff_jig_var->peripheral.value = to_send_value->peripheral.value;
+				buff_jig_var->test_result.value = test_res.value;
+				xQueueSend (httpQueue, &buff_jig_var, 0);
+				DEBUG_WARN ("SEND queue \r\n");
+			}
+			if ((now - last_tick) > 500 )
+			{
+//				DEBUG_INFO ("SEND TEST CMD \r\n");
+				send_test_command (&test_cmd);
+				last_tick = now;
+			}
+			if ((now - last_vol_tick) > 1500)
+			{
+				volTest ();
+				last_vol_tick = now;
+			}
+		}
+		else
+		{
+			DEBUG_INFO ("NOT IN TESTING MODE\r\n");
+		}
+		osDelay (100);
+//			uxBits = xEventGroupWaitBits(m_wdg_event_group,
+//				defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB,
+//										pdTRUE,
+//										pdTRUE,
+//										10);
+
+//		 if ((uxBits & (defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB))
+//			 == (defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB))
+//		 {
+//			 HAL_IWDG_Refresh(&hiwdg);
+//		 }
+
+
+	}
+}
+//*********************************************************************************************************************//
+
+void flash_task(void *argument)
+{
+	DEBUG_INFO("ENTER flash TASK\r\n");
+	int32_t file_size = 0;
+	 GPIO_InitTypeDef GPIO_InitStruct1 = {0};
+	 while (!tusb_init_flag)
+	 {
+		 vTaskDelay(100);
+	 }
+
+	if (m_disk_is_mounted)
+	{
+//		vTaskDelay (200);
+		file_size = fatfs_read_file(info_file, (uint8_t*)m_file_address, sizeof(m_file_address) - 1);
+		if (file_size > 0)
+		{
+			DEBUG_INFO ("READ THE INFO FILE \r\n");
+			/*
+			{
+				"boot":4096,
+				"firmware":65536,
+				"ota_data":2555904,
+				"partition":32768
+			}
+			*/
+			char *ptr = strstr(m_file_address, "\"boot\":");
+			if (ptr)
+			{
+				DEBUG_INFO ("FOUND THE BOOT STRING\r\n");
+				ptr += strlen("\"boot\":");
+				m_binary.boot.addr = utilities_get_number_from_string(0, ptr);
+			}
+
+			ptr = strstr(m_file_address, "\"firmware\":");
+			if (ptr)
+			{
+				ptr += strlen("\"firmware\":");
+				m_binary.firm.addr = utilities_get_number_from_string(0, ptr);
+			}
+			ptr = strstr(m_file_address, "\"ota_data\":");
+			if (ptr)
+			{
+				ptr += strlen("\"ota_data\":");
+				m_binary.ota.addr = utilities_get_number_from_string(0, ptr);
+			}
+			ptr = strstr(m_file_address, "\"partition\":");
+			if (ptr)
+			{
+				ptr += strlen("\"partition\":");
+				m_binary.part.addr = utilities_get_number_from_string(0, ptr);
+			}
+		}
+
+		file_size = fatfs_get_file_size(bootloader_file);
+		if (file_size > -1)
+		{
+			m_binary.boot.size = file_size;
+			m_binary.boot.file_name = bootloader_file;
+		}
+
+		file_size = fatfs_get_file_size(firmware_file);
+		if (file_size > -1)
+		{
+			m_binary.firm.size = file_size;
+			m_binary.firm.file_name = firmware_file;
+		}
+
+		file_size = fatfs_get_file_size(ota_file);
+		if (file_size > -1)
+		{
+			m_binary.ota.size = file_size;
+			m_binary.ota.file_name = ota_file;
+		}
+
+		file_size = fatfs_get_file_size(partition_file);
+		if (file_size > -1)
+		{
+			m_binary.part.size = file_size;
+			m_binary.part.file_name = partition_file;
+		}
+
+		DEBUG_INFO("Bootloader offset 0x%08X, firmware 0x%08X, ota  0x%08X, partition table 0x%08X\r\n", m_binary.boot.addr, m_binary.firm.addr, m_binary.ota.addr, m_binary.part.addr);
+		DEBUG_INFO("Bootloader %u bytes, firmware %u bytes, ota %u bytes, partition table %u bytes\r\n", m_binary.boot.size, m_binary.firm.size, m_binary.ota.size, m_binary.part.size);
+	}
+	m_loader_cfg.gpio0_trigger_port = (uint32_t)ESP_IO0_GPIO_Port;
+	m_loader_cfg.reset_trigger_port = (uint32_t)ESP_EN_GPIO_Port;
+	m_loader_cfg.uart_addr = (uint32_t)USART2;
+	m_loader_cfg.spi_addr = (uint32_t)&hspi2;
+	if (m_loader_cfg.spi_addr)
+	{
+		spi_flash_firm_init (m_loader_cfg.spi_addr);
+	}
+	esp_loader_error_t err;
+
+	// Clear led busy & success, set led error
+//	HAL_GPIO_WritePin(LED_BUSY_GPIO_Port, LED_BUSY_Pin, GPIO_PIN_SET);
+//	HAL_GPIO_WritePin(LED_DONE_GPIO_Port, LED_DONE_Pin, GPIO_PIN_SET);
+
+	for (;;)
+	{
+		if (0)
+		{
+		DEBUG_INFO("ENTER flash LOOP\r\n");
+		if (led_busy_toggle > 10)
+		{
+			led_busy_toggle = 1;
+		}
+		xEventGroupWaitBits(m_button_event_group,
+								BIT_EVENT_GROUP_BT_IN_PRESSED,
+								pdTRUE,
+								pdFALSE,
+								portMAX_DELAY);
+		//   THRERE one KEY NOW
+		DEBUG_INFO("KEY IS PRESSED\r\n");
+		USART2->CR1 |= (uint32_t)(1<<2);
+		DEBUG_INFO ("RECIEVE ENABLE \r\n");
+		GPIO_InitStruct1.Pin = ESP_EN_Pin|ESP_IO0_Pin;
+		GPIO_InitStruct1.Mode = GPIO_MODE_OUTPUT_PP;
+		GPIO_InitStruct1.Pull = GPIO_NOPULL;
+		GPIO_InitStruct1.Speed = GPIO_SPEED_FREQ_LOW;
+		HAL_GPIO_Init(GPIOC, &GPIO_InitStruct1);
+		DEBUG_INFO ("REINT IO0 \r\n");
+//		HAL_GPIO_WritePin(LED_BUSY_GPIO_Port, LED_BUSY_Pin, GPIO_PIN_RESET);
+//		HAL_GPIO_WritePin(LED_ERROR_GPIO_Port, LED_ERROR_Pin, GPIO_PIN_SET);
+//		HAL_GPIO_WritePin(LED_DONE_GPIO_Port, LED_DONE_Pin, GPIO_PIN_SET);
+		uint32_t now = xTaskGetTickCount();
+		uint32_t retry = 4;
+		while (m_binary.part.size > 0
+				&& m_binary.firm.size > 0
+				&& m_binary.ota.size >0
+				&& m_binary.part.size > 0
+				)
+		{
+			if (retry == 0)
+			{
+				break;
+			}
+			retry--;
+			loader_port_change_baudrate(&m_loader_cfg, 115200);
+			DEBUG_INFO("Connecting to target remain %u times\r\n", retry);
+			led_busy_toggle = 1000000;
+			err = esp_loader_connect(&m_loader_cfg);
+			if (err != ESP_LOADER_SUCCESS)
+			{
+				DEBUG_ERROR("Connect to target failed %d\r\n", err);
+//				HAL_GPIO_WritePin(LED_ERROR_GPIO_Port, LED_BUSY_Pin, GPIO_PIN_RESET);
+				continue;
+			}
+			else
+			{
+				DEBUG_INFO("Connected to target %s\r\n", chip_des[m_loader_cfg.target]);
+			}
+			DEBUG_INFO("Change baudrate\r\n");
+			err = esp_loader_change_baudrate(&m_loader_cfg, 115200);
+			if (err == ESP_LOADER_ERROR_UNSUPPORTED_FUNC)
+			{
+				DEBUG_ERROR("ESP8266 does not support change baudrate command\r\n");
+			}
+			else if (err != ESP_LOADER_SUCCESS)
+			{
+				DEBUG_ERROR("Unable to change baud rate on target\r\n");
+			}
+			else
+			{
+				err = loader_port_change_baudrate(&m_loader_cfg, 115200);
+				if (err != ESP_LOADER_SUCCESS)
+				{
+					DEBUG_ERROR("Unable to change baud rate\r\n");
+				}
+				else
+				{
+					DEBUG_INFO("Port[%u] : Baudrate changed\r\n");
+				}
+			}
+
+			DEBUG_INFO("Flash bootloader\r\n");
+			if (flash_binary_stm32(&m_loader_cfg, &m_binary.boot) != ESP_LOADER_SUCCESS)
+			{
+				DEBUG_INFO("FLASH BOOTLOADER FAIL \r\n");
+//				HAL_GPIO_WritePin(LED_ERROR_GPIO_Port, LED_ERROR_Pin, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
+				vTaskDelay(4000);
+				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_RESET);
+				xEventGroupClearBits(m_button_event_group,
+									BIT_EVENT_GROUP_BT_IN_PRESSED);
+				break;
+			}
+
+			DEBUG_INFO("Flash firm\r\n");
+			if (flash_binary_stm32(&m_loader_cfg, &m_binary.firm) != ESP_LOADER_SUCCESS)
+			{
+				DEBUG_INFO("FLASH firmware FAIL \r\n");
+//				HAL_GPIO_WritePin(LED_ERROR_GPIO_Port, LED_ERROR_Pin, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
+				vTaskDelay(4000);
+				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_RESET);
+				xEventGroupClearBits(m_button_event_group,
+									BIT_EVENT_GROUP_BT_IN_PRESSED);
+				break;
+			}
+#warning "Chua nap thanh cong file ota"
+//			DEBUG_INFO("Flash ota\r\n");
+//			if (flash_binary_stm32(&m_loader_cfg, &m_binary.ota) != ESP_LOADER_SUCCESS)
+//			{
+//				DEBUG_INFO("FLASH OTA FAIL \r\n");
+//				HAL_GPIO_WritePin(LED_ERROR_GPIO_Port, LED_ERROR_Pin, GPIO_PIN_RESET);
+//				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
+//				vTaskDelay(4000);
+//				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_RESET);
+//				xEventGroupClearBits(m_button_event_group,
+//									BIT_EVENT_GROUP_KEY_0_PRESSED);
+//				break;
+//			}
+
+			DEBUG_INFO("Flash partition table\r\n");
+			if (flash_binary_stm32(&m_loader_cfg, &m_binary.part) != ESP_LOADER_SUCCESS)
+			{
+				DEBUG_INFO("FLASH partition FAIL \r\n");
+//				HAL_GPIO_WritePin(LED_ERROR_GPIO_Port, LED_ERROR_Pin, GPIO_PIN_RESET);
+				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_SET);
+				vTaskDelay(4000);
+				HAL_GPIO_WritePin(BUZZ_GPIO_Port, BUZZ_Pin, GPIO_PIN_RESET);
+				xEventGroupClearBits(m_button_event_group,
+									BIT_EVENT_GROUP_BT_IN_PRESSED);
+
+				break;
+			}
+			retry = 0;
+			xEventGroupClearBits(m_button_event_group,
+								BIT_EVENT_GROUP_BT_IN_PRESSED);
+			DEBUG_INFO ("Total flash write time %us\r\n", (xTaskGetTickCount() - now)/1000);
+//			HAL_GPIO_WritePin (LED_ERROR_GPIO_Port, LED_BUSY_Pin, GPIO_PIN_RESET);
+//			HAL_GPIO_WritePin (GPIOF, LED_DONE_Pin, GPIO_PIN_RESET);
+			if (led_busy_toggle > 10)
+			{
+				led_busy_toggle = 1;
+			}
+
+			loader_port_change_baudrate (&m_loader_cfg, 115200);
+			// loader_port_reset_target(&m_loader_cfg);
+			// Led success on, led busy off
+//			HAL_GPIO_WritePin(LED_DONE_GPIO_Port, LED_DONE_Pin, GPIO_PIN_RESET);
+//			HAL_GPIO_WritePin(LED_BUSY_GPIO_Port, LED_BUSY_Pin, GPIO_PIN_SET);
+
+			//// io0 reint
+			GPIO_InitStruct1.Pin = ESP_IO0_Pin;
+			GPIO_InitStruct1.Mode = GPIO_MODE_ANALOG;
+			GPIO_InitStruct1.Pull = GPIO_NOPULL;
+			HAL_GPIO_Init(ESP_IO0_GPIO_Port, &GPIO_InitStruct1);
+			HAL_GPIO_WritePin((GPIO_TypeDef*)m_loader_cfg.gpio0_trigger_port, m_loader_cfg.gpio0_trigger_pin, GPIO_PIN_SET);
+			/// end reint
+			DEBUG_INFO ("SET GPIO0 ANALOG MODE \r\n");
+			USART2->CR1 &= (uint32_t)(~(1<<2));
+			DEBUG_INFO ("RE IS DISABLE \r\n");
+			break;
+		}
+		vTaskDelay(45000);
+		DEBUG_INFO ("WAIT 45S DONE \r\n");
+		}
+		else
+		{
+//			DEBUG_INFO ("IN FLASH TASK \r\n");
+			xEventGroupSetBits(m_wdg_event_group, flashTaskB);
+			vTaskDelay(10);
+		}
+	}
+}
+
+//*******************************************************************************************//
+
+
+
+
 // *********************** interrupt callback ************************//
 void rs232_rx_callback (void)
 {
-//	uint8_t ch = getChar (USART3);
-//	lwrb_write (&m_ringbuffer_host_rx, &ch, 1);
+	uint8_t ch = getChar (USART3);
+	lwrb_write (&m_ringbuffer_host_rx, &ch, 1);
 }
 
 void rs485_rx_callback (void)
 {
-//	idle_detect = 5;
-//	uint8_t ch =getChar(UART5);
-//	lwrb_write (&m_ringbuffer_rs485_rx, &ch, 1);
-////	DEBUG_ISR ("%c",ch);
+	idle_detect = 5;
+	uint8_t ch =getChar(UART5);
+	lwrb_write (&m_ringbuffer_rs485_rx, &ch, 1);
+//	DEBUG_ISR ("%c",ch);
 }
 
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
@@ -698,6 +1436,250 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 //  }
 }
 //********************************************************************//
+
+
+//*******************************************************************************************************//
+//										FUNCTION USE													//
+//*****************************************************************************************************//
+
+void send_test_command(min_msg_t * test_command)
+{
+	min_send_frame (&m_min_context, test_command);
+}
+void Get_MAC(jig_value_t * value, uint8_t *MAC)
+{
+	for (uint8_t i = 0 ; i < 6; i++)
+	{
+		MAC[i] = value ->mac[i];
+	}
+}
+
+
+void min_rx_callback (void *min_context , min_msg_t *frame)
+{
+	switch (frame ->id)
+	{
+	case MIN_ID_RS232_ENTER_TEST_MODE:
+		rx_value = (jig_value_t *)frame->payload;
+		Get_MAC(rx_value, (uint8_t *)MAC);
+		DEBUG_INFO ("MAC: %02x: %02x: %02x: %02x: %02x: %02x\r\n", MAC[0], MAC[1], MAC[2],MAC[3],MAC[4],MAC[5]);
+		get_jig_info = true;
+		test_res.result.rs232 = 1;
+		break;
+	case MIN_ID_RS232_ESP32_RESET:
+		test_res.result.test_wd_ok = 1;
+		test_res.result.rs232 = 1;
+		break;
+	default:
+		test_res.result.rs232 = 0;
+		break;
+	}
+}
+bool RS232_tx (void *ctx, uint8_t byte)
+{
+	(void)ctx;
+	putChar (USART3, byte);
+	return true;
+}
+
+void volTest(void)
+{
+	DEBUG_VERBOSE ("VOL TESTING ENTER \r\n");
+	uint8_t res_cnt;
+	uint16_t VolRes[4];
+	for (uint8_t i = 0; i < 6; i ++)
+	{
+		VolRes [i] = (ADCScan[i]*3300/4095);
+		VolRes [i] = VolRes[i] *2;
+	}
+	DEBUG_VERBOSE ("V4V2 : %d mV\r\n", VolRes [0]);
+	DEBUG_VERBOSE ("VBAT : %d mV\r\n", VolRes [1]);
+	DEBUG_VERBOSE ("V5v : %d mV\r\n", VolRes [2]);
+	DEBUG_VERBOSE ("V3v3 : %d mV\r\n", VolRes [3]);
+	DEBUG_VERBOSE ("V1v8 : %d mV\r\n", VolRes [4]);
+	DEBUG_VERBOSE ("Vsys : %d mV\r\n", VolRes [5]);
+	res_cnt = 0;
+//	if (voltage_info.v4v2_min <= VolRes[0] && VolRes[0] <= voltage_info.v4v2_max)
+//	{
+//		test_res.result.vgsm4v2_ok = 1;
+//		res_cnt++;
+//	}
+//	else
+//	{
+//		test_res.result.vgsm4v2_ok = 0;
+//	}
+	if (voltage_info.vbat_min <= VolRes[1] && VolRes[1] <= voltage_info.vbat_max)
+	{
+		test_res.result.vbat_ok = 1;
+		res_cnt++;
+	}
+	else
+	{
+		test_res.result.vbat_ok = 0;
+		res_cnt++;
+	}
+//	if (voltage_info.v5v_min <= VolRes[2] && VolRes[2] <= voltage_info.v5v_max)
+//	{
+//		test_res.result.v5v_ok = 1;
+//		res_cnt++;
+//	}
+//	else
+//	{
+//		test_res.result.v5v_ok = 0;
+//	}
+	if (voltage_info.v3v3_min <= VolRes[1] && VolRes[1] <= voltage_info.v3v3_max)
+	{
+		test_res.result.v3v3_ok = 1;
+		res_cnt++;
+	}
+	else
+	{
+		test_res.result.v3v3_ok = 0;
+	}
+	if (voltage_info.v1v8_min <= VolRes[4] && VolRes[4] <= voltage_info.v1v8_max)
+	{
+		test_res.result.v1v8_ok = 1;
+		res_cnt++;
+	}
+	else
+	{
+		test_res.result.v1v8_ok = 0;
+	}
+	if (voltage_info.vsys_min <= VolRes[0] && VolRes[0] <= voltage_info.vsys_max)
+	{
+		test_res.result.vsys_ok = 1;
+		res_cnt++;
+	}
+	else
+	{
+		test_res.result.vsys_ok = 0;
+	}
+	if (res_cnt == 6)
+	{
+//		return true;
+		DEBUG_VERBOSE ("VOLTAGE OK\r\n");
+	}
+	else
+	{
+		DEBUG_VERBOSE ("VOLTAGE FAIL \r\n");
+	}
+//	return false;
+}
+
+bool PassTest (jig_value_t * value)
+{
+	if (strlen (value->gsm_imei) >= 15)
+	{
+		test_res.result.sim_ok = 1;
+		DEBUG_VERBOSE ("SIM OK \r\n");
+	}
+	else
+	{
+		test_res.result.sim_ok = 0;
+		DEBUG_VERBOSE ("SIM NOT OK \r\n");
+	}
+	if (25 <= value->temperature && value->temperature <=50)
+	{
+		test_res.result.temper_ok = 1;
+		DEBUG_VERBOSE ("TEMPER IS OK \r\n");
+	}
+	else
+	{
+		test_res.result.temper_ok = 0;
+		DEBUG_VERBOSE ("TEMPER IS not OK \r\n");
+	}
+	if (test_res.result.rs232
+		&& test_res.result.rs485
+		&& test_res.result.relay0_ok
+		&& test_res.result.relay1_ok
+		&& test_res.result.v1v8_ok
+		&& test_res.result.v3v3_ok
+		&& test_res.result.vbat_ok
+		&& test_res.result.vsys_ok
+		&& test_res.result.sim_ok
+		&& test_res.result.test_wd_ok
+		&& test_res.result.temper_ok
+		)
+	{
+		allPassed = true;
+		DEBUG_VERBOSE ("ALL TEST RESULT PASS \r\n");
+		return true;
+	}
+	else
+	{
+		allPassed = false;
+		return false;
+	}
+	return 0;
+}
+
+/**********************************    BUTTON APP FUNCTION         ******************************************/
+void button_initialize(uint32_t button_num)
+{
+
+}
+
+uint32_t btn_read(uint32_t pin)
+{
+    if (pin == 0)
+    {
+        return HAL_GPIO_ReadPin(BT_IN_GPIO_Port, BT_IN_Pin);
+    }
+    return 1;
+//    else if (pin == 1)
+//    {
+//	return HAL_GPIO_ReadPin(KEY1_GPIO_Port, KEY1_Pin);
+//    }
+//    return HAL_GPIO_ReadPin(KEY3_GPIO_Port, KEY3_Pin);
+}
+
+void on_btn_pressed(int number, int event, void * pData)
+{
+    DEBUG_INFO("On button %d pressed\r\n", number);
+    if (number == 0)
+    {
+        xEventGroupSetBits(m_button_event_group, BIT_EVENT_GROUP_BT_IN_PRESSED);
+    }
+//    else if (number == 1)
+//    {
+//        xEventGroupSetBits(m_button_event_group, BIT_EVENT_GROUP_KEY_1_PRESSED);
+//    }
+//    else
+//    {
+//        //xEventGroupSetBits(m_button_event_group, BIT_EVENT_GROUP_BUTTON_1_PRESSED);
+//    }
+}
+
+void on_btn_release(int number, int event, void * pData)
+{
+    DEBUG_VERBOSE("On button %d release\r\n", number);
+    if (number == 0)
+    {
+        xEventGroupClearBits(m_button_event_group, BIT_EVENT_GROUP_BT_IN_PRESSED);
+    }
+//    else if (number == 1)
+//    {
+//        xEventGroupClearBits(m_button_event_group, BIT_EVENT_GROUP_KEY_1_PRESSED);
+//    }
+//    else if (number == 2)
+//    {
+//      xEventGroupClearBits(m_button_event_group, BIT_EVENT_GROUP_BUTTON_2_PRESSED);
+//    }
+}
+
+void on_btn_hold(int number, int event, void * pData)
+{
+    DEBUG_INFO("On button %d pair hold, enter pair mode\r\n", number);
+}
+
+
+static void on_btn_hold_so_long(int index, int event, void * pData)
+{
+    DEBUG_INFO("Button hold so long\r\n");
+}
+/*******************************************************************/
+
+//******************************************  SNTP FUNCTION *******************************************************//
 static void convert_second_to_date_time(uint32_t sec, date_time_t *t, uint8_t Calyear)
 {
     uint16_t day;
@@ -891,20 +1873,12 @@ void reInitRTC ( RTC_TimeTypeDef sTime, RTC_DateTypeDef sDate)
 
 	  /** Initialize RTC and set the Time and Date
 	  */
-//	  sTime.Hours = 0x0;
-//	  sTime.Minutes = 0x0;
-//	  sTime.Seconds = 0x0;
-//	  sTime.DayLightSaving = RTC_DAYLIGHTSAVING_NONE;
-//	  sTime.StoreOperation = RTC_STOREOPERATION_RESET;
+
 	  if (HAL_RTC_SetTime(&hrtc, &sTime, RTC_FORMAT_BIN) != HAL_OK)
 	  {
 		  DEBUG_ERROR ("CAN'T SET TIME \r\n");
 	    Error_Handler();
 	  }
-//	  sDate.WeekDay = RTC_WEEKDAY_MONDAY;
-//	  sDate.Month = RTC_MONTH_JANUARY;
-//	  sDate.Date = 0x12;
-//	  sDate.Year = 0x0;
 
 	  if (HAL_RTC_SetDate(&hrtc, &sDate, RTC_FORMAT_BIN) != HAL_OK)
 	  {
@@ -913,5 +1887,55 @@ void reInitRTC ( RTC_TimeTypeDef sTime, RTC_DateTypeDef sDate)
 	  }
 }
 //*****************************************************************//
+
+//*********************** json encode*********************************//
+int16_t json_build(jig_value_t *value, func_test_t * test, char *json_str)
+{
+	char mac_str[18];
+	int16_t index = 0;
+
+	index += sprintf (json_str+index, "[{\"timestamp\":%lu,", 				value ->timestamp);
+	index += sprintf (json_str+index, "\"DeviceType\":\"%s\",", 			value ->device_type ? "B02":"B01");
+	index += sprintf (json_str+index, "\"FirmwareVersion\":\"%d.%d.%d\",",	value ->fw_version[0],value ->fw_version[1],value ->fw_version[2] );
+	index += sprintf (json_str+index, "\"HardwardVersion\":\"%d.%d.%d\",",	value ->hw_version[0],value ->hw_version[1],value ->hw_version[2] );
+	index += sprintf (json_str+index, "\"GsmIMEI\":\"%s\",", 				value ->gsm_imei);
+	sprintf (mac_str, "%02x:%02x:%02x:%02x:%02x:%02x",	value->mac[0],
+														value->mac[1],
+														value->mac[2],
+														value->mac[3],
+														value->mac[4],
+														value->mac[5]);
+//	make_string_from_mac (mac_str);
+	index += sprintf (json_str+index, "\"MacJIG\":\"%s\",", 			mac_str);
+	index += sprintf (json_str+index, "\"ErrorResults\":{");
+	index += sprintf (json_str+index, "\"sim\":%s,", 					test->result.sim_ok ? "true" : "false");
+	index += sprintf (json_str+index, "\"vGsm4V2\":%s,", 				test ->result.vgsm4v2_ok ? "true" : "false");
+	index += sprintf (json_str+index, "\"eth\":%s,", 					value ->peripheral.name.eth ? "true" : "false");
+	index += sprintf (json_str+index, "\"wifi\":%s,", 					value ->peripheral.name.wifi ? "true" : "false");
+	index += sprintf (json_str+index, "\"server\":%s,", 				value ->peripheral.name.server ? "true" : "false");
+//	sprintf (json_str_buff, "\"GSM status\":%d,\r\n", 				value ->peripheral.name.gsm);
+
+	index += sprintf (json_str+index, "\"mainPower\":%s,", 				value ->peripheral.name.main_power_pass ? "true" : "false");
+	index += sprintf (json_str+index, "\"backupPower\":%s,", 			value ->peripheral.name.backup_power_pass? "true" : "false");
+	index += sprintf (json_str+index, "\"buttonTest\":%s,", 			value ->peripheral.name.button_pass? "true" : "false");
+	index += sprintf (json_str+index, "\"input1\":%s,",					value->peripheral.name.input0_pass ? "true" : "false");
+	index += sprintf (json_str+index, "\"input2\":%s,",					value->peripheral.name.input1_pass ? "true" : "false");
+	index += sprintf (json_str+index, "\"input3\":%s,",					value->peripheral.name.input2_pass ? "true" : "false");
+	index += sprintf (json_str+index, "\"input4\":%s,",					value->peripheral.name.input3_pass ? "true" : "false");
+	index += sprintf (json_str+index, "\"temperature\":%s,", 			test->result.temper_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"charge\":%s,", 				test->result.charge_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"alarmIn\":%s,", 				test->result.alarm_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"faultIn\":%s,", 				test->result.fault_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"sosButton\":%s,", 				test->result.sosButton_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"relay0\":%s,", 				test->result.relay0_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"relay1\":%s,", 				test->result.relay1_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"watchdog\":%s,", 				test->result.test_wd_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"vbat\":%s,", 					test->result.vbat_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"v1v8\":%s,", 					test->result.v1v8_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"v3v3\":%s,", 					test->result.v3v3_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"vsys\":%s,", 					test->result.vsys_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"allPassed\":%s}}]", 			allPassed? "true" : "false");
+	return index;
+}
 /* USER CODE END Application */
 

@@ -87,6 +87,10 @@ extern uint32_t sys_get_ms(void);
 #define BT_IN_GPIO_Port GPIOA
 #define GD32_CLK_Pin GPIO_PIN_5
 #define GD32_CLK_GPIO_Port GPIOA
+#define ADC_VSYS_Pin GPIO_PIN_0
+#define ADC_VSYS_GPIO_Port GPIOB
+#define ADC_3V3_Pin GPIO_PIN_1
+#define ADC_3V3_GPIO_Port GPIOB
 #define ADC_1V8_Pin GPIO_PIN_11
 #define ADC_1V8_GPIO_Port GPIOF
 #define ADC_VBATRF_Pin GPIO_PIN_15
@@ -101,6 +105,8 @@ extern uint32_t sys_get_ms(void);
 #define STATUS_GPIO_Port GPIOE
 #define EN_STWD_Pin GPIO_PIN_14
 #define EN_STWD_GPIO_Port GPIOE
+#define FAULT_IN_Pin GPIO_PIN_15
+#define FAULT_IN_GPIO_Port GPIOE
 #define ALARM_IN_Pin GPIO_PIN_10
 #define ALARM_IN_GPIO_Port GPIOB
 #define BOTTON__Pin GPIO_PIN_11

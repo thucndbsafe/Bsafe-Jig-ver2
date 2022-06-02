@@ -229,7 +229,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   	  HAL_GPIO_TogglePin (MAIN_PW_GPIO_Port, MAIN_PW_Pin);
   	  HAL_GPIO_TogglePin (PRE_PWR__GPIO_Port, PRE_PWR__Pin);
   	  HAL_GPIO_TogglePin (ALARM_IN_GPIO_Port, ALARM_IN_Pin);
-//  	  HAL_GPIO_TogglePin (FAULT_IN_GPIO_Port, FAULT_IN_Pin);
+  	  HAL_GPIO_TogglePin (FAULT_IN_GPIO_Port, FAULT_IN_Pin);
     }
   /* USER CODE END Callback 1 */
 }

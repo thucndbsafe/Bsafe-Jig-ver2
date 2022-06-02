@@ -285,7 +285,7 @@ uint32_t fatfs_write_json_to_a_file_at_pos (const char* file, char* buff, uint32
 	end:
 	    return byte_write;
 }
-uint8_t check_file (const char* file)
+uint8_t fatfs_check_file (const char* file)
 {
 	FRESULT fr;
 	FILINFO fno;
@@ -304,7 +304,7 @@ uint8_t check_file (const char* file)
 		return 2;
 	}
 }
-void delete_a_file (const char * file)
+void fatfs_delete_a_file (const char * file)
 {
 	fresult = f_unlink (file);
 }
@@ -349,7 +349,7 @@ void delete_a_file (const char * file)
 //    }
 //    return fresult;
 //}
-FRESULT create_a_dir (const char * path)
+FRESULT fatfs_create_a_dir (const char * path)
 {
 	fresult = f_mkdir (path);
 	if (fresult != FR_OK)

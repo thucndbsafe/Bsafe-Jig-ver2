@@ -149,6 +149,7 @@ typedef struct
     uint32_t buffer_size;
 #ifdef STM32
     uint32_t uart_addr;
+    uint32_t spi_addr;
     uint32_t gpio0_trigger_port;
     uint32_t reset_trigger_port;
 #else

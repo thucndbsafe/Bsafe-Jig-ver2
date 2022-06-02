@@ -44,7 +44,9 @@ void MX_SPI2_Init(void);
 void MX_SPI3_Init(void);
 
 /* USER CODE BEGIN Prototypes */
-
+void spi_flash_firm_init (SPI_HandleTypeDef * hspi);
+void spi_send_bytes (uint32_t spi_addr, uint8_t *data, uint32_t size);
+uint32_t spi_get_bytes (uint32_t uart_addr, uint8_t *data, uint32_t size, uint32_t timeout);
 /* USER CODE END Prototypes */
 
 #ifdef __cplusplus

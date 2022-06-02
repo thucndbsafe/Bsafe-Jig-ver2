@@ -287,7 +287,7 @@ static void flash_write_control(app_flash_drv_t *flash_drv, uint8_t enable)
 
 static void wait_write_in_process(app_flash_drv_t *flash_drv, uint32_t timeout_ms)
 {
-    uint8_t status[2];
+    uint8_t status[3];
     // uint8_t cmd;
 
     /* Read status register */

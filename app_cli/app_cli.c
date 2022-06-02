@@ -136,7 +136,6 @@ void app_cli_start (app_cli_cb_t *callback)
 
 static int32_t fakeMAC (p_shell_context_t context, int32_t argc, char **argv)
 {
-	DEBUG_INFO ("ENTER THE FAKE MAC FUNC\r\n");
 	if (strlen (argv[1]) == 6)
 	{
 		fakeMac (argv[1]);
@@ -146,14 +145,15 @@ static int32_t fakeMAC (p_shell_context_t context, int32_t argc, char **argv)
 
 static int32_t resetChip (p_shell_context_t context, int32_t argc, char **argv)
 {
+
 	NVIC_SystemReset ();
-	 m_cb->printf("system reset done\r\n");
 	return 0;
 }
 
 static int32_t getTime (p_shell_context_t context, int32_t argc, char **argv)
 {
-	void getTimeNow (void);
+	 getTimeNow ();
+	 return 0;
 }
 static int32_t readPage (p_shell_context_t context, int32_t argc, char **argv)
 {
