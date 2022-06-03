@@ -19,6 +19,6 @@ uint8_t getByteToWriteToRingBuffer (ringBuffer_t *ringbuff);
 uint8_t getByteFromRingBufferAvailableToRead (ringBuffer_t *ringbuff);
 uint8_t readFromRingBuffer(ringBuffer_t *ringbuff);
 void WriteToRingBuffer(ringBuffer_t *ringbuff, USART_TypeDef * uart);
-
+void uart_tx(USART_TypeDef * uart,uint8_t *data, uint8_t size);
 
 #endif //END OF RING BUFFER

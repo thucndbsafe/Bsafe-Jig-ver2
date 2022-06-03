@@ -315,7 +315,7 @@ static EventBits_t uxBits;
 	uint8_t relay_toggle_1;
 	bool ready_send_to_sever = false;
 	// adc read var
-	uint16_t ADCScan[4];
+	uint16_t ADCScan[2];
 	uint8_t idle_detect;
 //*****************************************************************************//
 
@@ -572,7 +572,7 @@ void StartDefaultTask(void const * argument)
 		 m_wdg_event_group = xEventGroupCreate();	  // creat group of wdt
 
 
-		HAL_ADC_Start_DMA (&hadc1, (uint32_t*)ADCScan, 4); //>>>Start ADC
+		HAL_ADC_Start_DMA (&hadc1, (uint32_t*)ADCScan, 2); //>>>Start ADC
 		vTaskDelay(500);
   /* Infinite loop */
 
@@ -592,6 +592,8 @@ void StartDefaultTask(void const * argument)
 	  }
 	  osDelay (200);
 	  initialize_stnp();
+	  uart_tx (USART3, (uint8_t *)"hello", 5);
+	  HAL_GPIO_WritePin (GPIOC, ESP_EN_Pin|ESP_IO0_Pin, GPIO_PIN_SET);
   for(;;)
   {
 	  app_btn_scan(NULL);
@@ -786,6 +788,28 @@ void testing_task (void *arg)
 	uint32_t last_tick_time_out = 0;
 	uint32_t last_vol_tick = 0;
 //	uint32_t json_len;
+	//************** INIT GPIO TO TEST****************//
+	HAL_GPIO_DeInit (GPIOB, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15);
+	HAL_GPIO_DeInit (GPIOC, ESP_IO0_Pin|ESP_EN_Pin );
+	HAL_GPIO_DeInit (GPIOA, GD32_SDIO_Pin|GD32_CLK_Pin );
+	GPIO_InitTypeDef GPIO_InitStruct1 = {0};
+	GPIO_InitStruct1.Pin = ESP_IO0_Pin|ESP_EN_Pin ;
+	GPIO_InitStruct1.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct1.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOC, &GPIO_InitStruct1);
+	HAL_GPIO_WritePin(GPIOC, ESP_IO0_Pin|ESP_EN_Pin, GPIO_PIN_SET);
+	GPIO_InitTypeDef GPIO_InitStruct2 = {0};
+	GPIO_InitStruct2.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15;
+	GPIO_InitStruct2.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct2.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOB, &GPIO_InitStruct2);
+	GPIO_InitTypeDef GPIO_InitStruct3 = {0};
+	GPIO_InitStruct3.Pin = GD32_SDIO_Pin|GD32_CLK_Pin;
+	GPIO_InitStruct3.Mode = GPIO_MODE_ANALOG;
+	GPIO_InitStruct3.Pull = GPIO_NOPULL;
+	HAL_GPIO_Init(GPIOA, &GPIO_InitStruct3);
+
+	//***********************************************//
 	const min_msg_t test_cmd =
 	{
 			.id = MIN_ID_RS232_ENTER_TEST_MODE,
@@ -810,7 +834,7 @@ void testing_task (void *arg)
 		 * }
 		 * */
 		DEBUG_VERBOSE ("READ %d byte size\r\n", file_size);
-		DEBUG_VERBOSE ("%s", V_info_buff);
+		DEBUG_INFO ("%s", V_info_buff);
 		if (file_size > 0)
 		{
 			char *ptr = strstr((char*)V_info_buff, "\"vbat_max\":");
@@ -912,21 +936,20 @@ void testing_task (void *arg)
 		}
 		if(1)//HAL_GPIO_ReadPin(MODE1_GPIO_Port, MODE1_Pin) && HAL_GPIO_ReadPin(MODE2_GPIO_Port, MODE2_Pin))//xet trang thai bit gat
 		{
-			DEBUG_VERBOSE ("IN TEST MODE\r\n");
 			if(idle_detect)
 			{
 				idle_detect --;
 				if (idle_detect == 0)
 				{
-					DEBUG_INFO ("RS485 SAY:\r\n %s", rs485ringBuffer);
-					char * testptr = strstr((char*)rs485ringBuffer, "IN TEST MODE");
+//					DEBUG_INFO ("RS485 SAY:\r\n %s", rs485ringBuffer);
+					char * testptr = strstr((char*)rs485ringBuffer, "[I]");
 					if (testptr)
 					{
 						test_res.result.rs485 = true;
+
 					}
 				}
 			}
-
 			if (get_jig_info)
 			{
 					DEBUG_INFO ("GET EOF START CHECK MAC \r\n");
@@ -1086,7 +1109,8 @@ void testing_task (void *arg)
 				memcpy (buff_jig_var->sim_imei, to_send_value->sim_imei, 16);
 				buff_jig_var->peripheral.value = to_send_value->peripheral.value;
 				buff_jig_var->test_result.value = test_res.value;
-				xQueueSend (httpQueue, &buff_jig_var, 0);
+
+//				xQueueSend (httpQueue, &buff_jig_var, 0);
 				DEBUG_WARN ("SEND queue \r\n");
 			}
 			if ((now - last_tick) > 500 )
@@ -1105,7 +1129,7 @@ void testing_task (void *arg)
 		{
 			DEBUG_VERBOSE ("NOT IN TESTING MODE\r\n");
 		}
-		osDelay (200);
+		osDelay (10);
 //			uxBits = xEventGroupWaitBits(m_wdg_event_group,
 //				defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB,
 //										pdTRUE,
@@ -1210,11 +1234,11 @@ void flash_task(void *argument)
 	m_loader_cfg.gpio0_trigger_port = (uint32_t)ESP_IO0_GPIO_Port;
 	m_loader_cfg.reset_trigger_port = (uint32_t)ESP_EN_GPIO_Port;
 	m_loader_cfg.uart_addr = (uint32_t)USART2;
-	m_loader_cfg.spi_addr = (uint32_t)&hspi2;
-	if (m_loader_cfg.spi_addr)
-	{
-		spi_flash_firm_init ((SPI_HandleTypeDef *)m_loader_cfg.spi_addr);
-	}
+//	m_loader_cfg.spi_addr = (uint32_t)&hspi2;
+//	if (m_loader_cfg.spi_addr)
+//	{
+//		spi_flash_firm_init ((SPI_HandleTypeDef *)m_loader_cfg.spi_addr);
+//	}
 	esp_loader_error_t err;
 
 	// Clear led busy & success, set led error
@@ -1535,14 +1559,14 @@ void flashbyspi(void)
 // *********************** interrupt callback ************************//
 void rs232_rx_callback (void)
 {
-	uint8_t ch = getChar (USART3);
+	uint8_t ch = getChar (UART5);
 	lwrb_write (&m_ringbuffer_host_rx, &ch, 1);
 }
 
 void rs485_rx_callback (void)
 {
 	idle_detect = 5;
-	uint8_t ch =getChar(UART5);
+	uint8_t ch =getChar(USART3);
 	lwrb_write (&m_ringbuffer_rs485_rx, &ch, 1);
 //	DEBUG_ISR ("%c",ch);
 }
@@ -1609,14 +1633,14 @@ void min_rx_callback (void *min_context , min_msg_t *frame)
 		test_res.result.rs232 = 1;
 		break;
 	default:
-		test_res.result.rs232 = 0;
+//		test_res.result.rs232 = 0;
 		break;
 	}
 }
 bool RS232_tx (void *ctx, uint8_t byte)
 {
 	(void)ctx;
-	putChar (USART3, byte);
+	putChar (UART5, byte);
 	return true;
 }
 
@@ -1624,16 +1648,16 @@ void volTest(void)
 {
 	DEBUG_VERBOSE ("VOL TESTING ENTER \r\n");
 	uint8_t res_cnt;
-	uint16_t VolRes[4];
-	for (uint8_t i = 0; i < 4; i ++)
+	uint16_t VolRes[2];
+	for (uint8_t i = 0; i < 2; i ++)
 	{
 		VolRes [i] = (ADCScan[i]*3300/4095);
 		VolRes [i] = VolRes[i] *2;
 	}
-	DEBUG_INFO ("VSYS : %d mV\r\n", VolRes [0]);
-	DEBUG_INFO ("3V3 : %d mV\r\n", VolRes [1]);
-	DEBUG_INFO ("V5v : %d mV\r\n", VolRes [2]);
-	DEBUG_INFO ("V3v3 : %d mV\r\n", VolRes [3]);
+	DEBUG_VERBOSE ("VSYS : %d mV\r\n", VolRes [0]);
+	DEBUG_VERBOSE ("3V3 : %d mV\r\n", VolRes [1]);
+//	DEBUG_VERBOSE ("V5v : %d mV\r\n", VolRes [2]);
+//	DEBUG_INFO ("V3v3 : %d mV\r\n", VolRes [3]);
 //	DEBUG_INFO ("V1v8 : %d mV\r\n", VolRes [4]);
 //	DEBUG_INFO ("Vsys : %d mV\r\n", VolRes [5]);`
 	res_cnt = 0;
@@ -1646,16 +1670,16 @@ void volTest(void)
 //	{
 //		test_res.result.vgsm4v2_ok = 0;
 //	}
-	if (voltage_info.vbat_min <= VolRes[1] && VolRes[1] <= voltage_info.vbat_max)
-	{
-		test_res.result.vbat_ok = 1;
-		res_cnt++;
-	}
-	else
-	{
-		test_res.result.vbat_ok = 0;
-		res_cnt++;
-	}
+//	if (voltage_info.vbat_min <= VolRes[1] && VolRes[1] <= voltage_info.vbat_max)
+//	{
+//		test_res.result.vbat_ok = 1;
+//		res_cnt++;
+//	}
+//	else
+//	{
+//		test_res.result.vbat_ok = 0;
+//		res_cnt++;
+//	}
 //	if (voltage_info.v5v_min <= VolRes[2] && VolRes[2] <= voltage_info.v5v_max)
 //	{
 //		test_res.result.v5v_ok = 1;
@@ -1674,15 +1698,15 @@ void volTest(void)
 	{
 		test_res.result.v3v3_ok = 0;
 	}
-	if (voltage_info.v1v8_min <= VolRes[4] && VolRes[4] <= voltage_info.v1v8_max)
-	{
-		test_res.result.v1v8_ok = 1;
-		res_cnt++;
-	}
-	else
-	{
-		test_res.result.v1v8_ok = 0;
-	}
+//	if (voltage_info.v1v8_min <= VolRes[4] && VolRes[4] <= voltage_info.v1v8_max)
+//	{
+//		test_res.result.v1v8_ok = 1;
+//		res_cnt++;
+//	}
+//	else
+//	{
+//		test_res.result.v1v8_ok = 0;
+//	}
 	if (voltage_info.vsys_min <= VolRes[0] && VolRes[0] <= voltage_info.vsys_max)
 	{
 		test_res.result.vsys_ok = 1;
@@ -1692,7 +1716,7 @@ void volTest(void)
 	{
 		test_res.result.vsys_ok = 0;
 	}
-	if (res_cnt == 6)
+	if (res_cnt == 2)
 	{
 //		return true;
 		DEBUG_INFO ("VOLTAGE OK\r\n");

@@ -25,9 +25,9 @@ void uart_tx(USART_TypeDef * uart,uint8_t *data, uint8_t size)
 //    __HAL_UART_ENABLE_IT(&huart6, UART_IT_RXNE);
     for (uint8_t i = 0; i < size; i++)
     {
-        HAL_Delay(1);
+//        HAL_Delay(1);
         putChar(uart, *(data+i));
-        HAL_Delay(1);
+//        HAL_Delay(1);
     }
 }
 void ringBufferInit(ringBuffer_t *ringbuff, uint8_t *tempbuff)

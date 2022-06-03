@@ -352,7 +352,32 @@ void USART2_IRQHandler(void)
 void USART3_IRQHandler(void)
 {
   /* USER CODE BEGIN USART3_IRQn 0 */
-	if((USART3 ->SR & (1 << 5)) && (USART3 ->CR1 & 1 << 5) ) //if rxne enable and be set
+	if (LL_USART_IsEnabledIT_IDLE(USART3) && LL_USART_IsActiveFlag_IDLE(USART3))
+	{
+		// DEBUG_ISR("IDLE\r\n");
+		LL_USART_ClearFlag_IDLE(USART3);        /* Clear IDLE line flag */
+	}
+
+	if (LL_USART_IsActiveFlag_ORE(USART3))
+	{
+		DEBUG_ISR("USART3 Overrun\r\n");
+		uint32_t tmp = USART3->DR;
+		(void)tmp;
+		LL_USART_ClearFlag_ORE(USART3);
+	}
+
+	if (LL_USART_IsActiveFlag_FE(USART3))
+	{
+		DEBUG_ISR("USART3 Frame error\r\n");
+		LL_USART_ClearFlag_FE(USART3);
+	}
+
+	if (LL_USART_IsActiveFlag_NE(USART3))
+	{
+		DEBUG_ISR("Noise error\r\n");
+		LL_USART_ClearFlag_NE(USART3);
+	}
+	if((USART3->SR & (1 << 5)) && (USART3->CR1 & (1 << 5))) //if rxne enable and be set
 	{
 		rs485_rx_callback();
 	}
@@ -396,6 +421,31 @@ void SPI3_IRQHandler(void)
 void UART5_IRQHandler(void)
 {
   /* USER CODE BEGIN UART5_IRQn 0 */
+	if (LL_USART_IsEnabledIT_IDLE(UART5) && LL_USART_IsActiveFlag_IDLE(UART5))
+	{
+		// DEBUG_ISR("IDLE\r\n");
+		LL_USART_ClearFlag_IDLE(UART5);        /* Clear IDLE line flag */
+	}
+
+	if (LL_USART_IsActiveFlag_ORE(UART5))
+	{
+		DEBUG_ISR("UART5 Overrun\r\n");
+		uint32_t tmp = UART5->DR;
+		(void)tmp;
+		LL_USART_ClearFlag_ORE(UART5);
+	}
+
+	if (LL_USART_IsActiveFlag_FE(UART5))
+	{
+		DEBUG_ISR("UART5 Frame error\r\n");
+		LL_USART_ClearFlag_FE(UART5);
+	}
+
+	if (LL_USART_IsActiveFlag_NE(UART5))
+	{
+		DEBUG_ISR("Noise error\r\n");
+		LL_USART_ClearFlag_NE(UART5);
+	}
 	if((UART5 ->SR & (1 << 5)) && (UART5 ->CR1 & 1 << 5) ) //if rxne enable and be set
 	{
 		rs232_rx_callback ();

@@ -99,7 +99,7 @@ void MX_UART5_Init(void)
   LL_USART_ConfigAsyncMode(UART5);
   LL_USART_Enable(UART5);
   /* USER CODE BEGIN UART5_Init 2 */
-  USART3 ->CR1 |= 1 << 5;
+  UART5 ->CR1 |= 1 << 5;
   /* USER CODE END UART5_Init 2 */
 
 }
@@ -269,8 +269,8 @@ void MX_USART3_UART_Init(void)
   LL_USART_ConfigAsyncMode(USART3);
   LL_USART_Enable(USART3);
   /* USER CODE BEGIN USART3_Init 2 */
-  UART5 ->CR1 |= 1 << 5;
-  HAL_GPIO_WritePin (RS485_GPIO_Port, RS485_Pin, 1);
+  USART3->CR1 |= 1 << 5;
+  HAL_GPIO_WritePin (RS485_GPIO_Port, RS485_Pin, 0);
   /* USER CODE END USART3_Init 2 */
 
 }
