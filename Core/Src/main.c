@@ -64,7 +64,6 @@ void MX_FREERTOS_Init(void);
 uint32_t sys_get_ms(void);
 bool lock_debug(bool lock, uint32_t timeout_ms);
 uint32_t rtt_tx(const void *buffer, uint32_t size);
-
 static SemaphoreHandle_t m_lock_debug;
 /* USER CODE END PFP */
 
@@ -219,6 +218,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
   if (htim->Instance == TIM2) {
     HAL_IncTick();
     toggle_100_ms++;
+    HAL_GPIO_TogglePin (WDI_GPIO_Port, WDI_Pin);
   }
   /* USER CODE BEGIN Callback 1 */
   if (toggle_100_ms == 100)

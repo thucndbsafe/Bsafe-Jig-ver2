@@ -46,7 +46,7 @@ uint32_t fatfs_write_to_a_file_at_pos (const char* file, char* buff, uint32_t si
 uint32_t fatfs_write_json_to_a_file_at_pos (const char* file, char* buff, uint32_t size, uint32_t pos);
 void fatfs_delete_a_file (const char * file);
 uint8_t fatfs_check_file (const char* file);
-FRESULT create_a_dir (const char * path);
+FRESULT fatfs_create_a_dir (const char * path);
 /* USER CODE END Prototypes */
 #ifdef __cplusplus
 }

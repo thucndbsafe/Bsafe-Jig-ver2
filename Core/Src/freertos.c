@@ -91,6 +91,20 @@ typedef union
 {
 	struct
 	{
+		uint8_t led1_ok: 1;
+		uint8_t led2_ok: 1;
+		uint8_t led3_ok: 1;
+		uint8_t led4_ok: 1;
+		uint8_t led5_ok: 1;
+		uint8_t led6_ok: 1;
+		uint16_t reserve:2;
+	}res;
+	uint8_t led_res;
+} led_result_t;
+typedef union
+{
+	struct
+	{
 		uint32_t rs485: 1;
 		uint32_t rs232: 1;
 		uint32_t test_wd_ok: 1;
@@ -107,10 +121,10 @@ typedef union
 		uint32_t fault_ok:1;
 		uint32_t relay0_ok: 1;
 		uint32_t relay1_ok: 1;
-		uint32_t buttonTest_ok: 1;
-		uint32_t sosButton_ok: 1;
+//		uint32_t buttonTest_ok: 1;
+//		uint32_t sosButton_ok: 1;
 		uint32_t vsys_ok:1;
-		uint32_t reserved : 13;
+		uint32_t reserved : 17;
 	} result;
 	uint32_t value;
 }__attribute__((packed)) func_test_t;
@@ -175,6 +189,8 @@ typedef struct
     func_test_t test_result;
 
     uint32_t timestamp;
+
+    led_result_t led_result;
 } __attribute__((packed)) jig_value_t;
 
 typedef struct
@@ -317,6 +333,34 @@ static EventBits_t uxBits;
 	// adc read var
 	uint16_t ADCScan[2];
 	uint8_t idle_detect;
+
+	//*********************LED DETECT VAR ************************//
+
+	static GPIO_PinState led_status[12];
+//	static uint8_t res_count[6];
+	#define LR1 0
+	#define LR2 1
+	#define LR3 2
+	#define LR4 3
+	#define LR5 4
+	#define LR6 5
+	#define LB1 6
+	#define LB2 7
+	#define LB3 8
+	#define LB4 9
+	#define LB5 10
+	#define LB6 11
+	static led_result_t led_detect =
+		{
+			.res.led1_ok = 0,
+			.res.led2_ok = 0,
+			.res.led3_ok = 0,
+			.res.led4_ok = 0,
+			.res.led5_ok = 0,
+			.res.led6_ok = 0,
+			.res.reserve = 0b11
+		};
+
 //*****************************************************************************//
 
 //********************************* MIN PROTOCOL VAR**********************//
@@ -415,6 +459,9 @@ void Get_sim_imei(jig_value_t * value, char *sim_imei);
 void Get_gsm_imei(jig_value_t * value, char *gsm_imei);
 
 void Get_MAC(jig_value_t * value, uint8_t *MAC);
+
+void check_led_status(void);
+
 //********************************************************************************************************************//
 
 /* USER CODE END FunctionPrototypes */
@@ -592,8 +639,6 @@ void StartDefaultTask(void const * argument)
 	  }
 	  osDelay (200);
 	  initialize_stnp();
-	  uart_tx (USART3, (uint8_t *)"hello", 5);
-	  HAL_GPIO_WritePin (GPIOC, ESP_EN_Pin|ESP_IO0_Pin, GPIO_PIN_SET);
   for(;;)
   {
 	  app_btn_scan(NULL);
@@ -717,7 +762,7 @@ void cdc_task(void* params)
 				break;
 			}
 		}
-//		xEventGroupSetBits(m_wdg_event_group, cdcTaskB);
+		xEventGroupSetBits(m_wdg_event_group, cdcTaskB);
 		vTaskDelay(pdMS_TO_TICKS(1));
 	}
 }
@@ -765,10 +810,237 @@ void Netif_Config (bool restart)
 
 }
 
+//***************************************************************************************************//
 
+//************************** NET APP TASK ***************************************************************//
+FRESULT fre;  // result
+DIR dir;
+void net_task(void *argument)
+{
+	DEBUG_INFO("ENTER THE HTTP AND MQTT TASK\r\n");
+//	xSemaphoreTake(hHttpStart, portMAX_DELAY);
+//	DEBUG_INFO ("PASS SEM TAKE \r\n");
+//	m_http_test_started = true;
+//	while (!m_ip_assigned)
+//		 {
+//			 vTaskDelay(10);
+//		 }
+//	  initialize_stnp();
+//	  osDelay (1);
+//	DEBUG_WARN ("GOT IP START TO SEND!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\r\n");
+	// http://httpbin.org/get
+
+	jig_value_t* rev_jig_value;
+	app_http_config_t http_cfg;
+	app_http_config_t http_cfg_file;
+	uint32_t len;
+	ETHERNET_STATE e_state = NOT_CONNECTED;
+	char file_name [64];
+	sent_an_offline_file = xSemaphoreCreateBinary ();
+	for (;;)
+	{
+		switch (e_state)
+		{
+		case NOT_CONNECTED:
+			if (m_ip_assigned) e_state = CONNECT;
+			break;
+		case CONNECT:
+			if (fatfs_check_file ("offline_test") == 1)
+			{
+				fre = fatfs_create_a_dir ("offline_test");
+			}
+
+			RTC_DateTypeDef sDateReadFile = {0};
+			HAL_RTC_GetDate (&hrtc, &sDateReadFile, RTC_FORMAT_BIN);
+			uint8_t this_month = sDateReadFile.Month;
+			uint8_t last_month;
+			uint8_t year = sDateReadFile.Year;
+			if (this_month == 1)
+			{
+				last_month = 12;
+				year = year - 1;
+			}
+			else
+			{
+				last_month = this_month - 1;
+			}
+			uint8_t month_read = day_in_month[this_month + 1];
+			uint8_t last_month_read = day_in_month[last_month + 1];
+//			sprintf (file_name, "offline_test/test%d-%d-%d", sDateWriteFile.Date, sDateWriteFile.Month, sDateWriteFile.Year);
+			//scan file sequence
+			for (uint8_t i = 1; i < last_month_read; i++)
+			{
+				sprintf (file_name, "0:/offline_test/test%d-%d-%d", i, last_month, year);
+				if(!fatfs_check_file (file_name))
+				{
+					len = fatfs_read_file (file_name, (uint8_t *)json_send_to_sever, 1024);
+					DEBUG_INFO ("READ %u byte \r\n", len);
+					if (len)
+					{
+						DEBUG_INFO ("json from file: %s\r\n", json_send_to_sever);
+						sprintf(http_cfg_file.url, "%s", "dev-api.basato.vn");
+						http_cfg.port = 80;
+						sprintf(http_cfg_file.file, "%s", "/fact/api/firesafe/test-result");
+						http_cfg_file.on_event_cb = (void*)0;
+						http_cfg_file.method = APP_HTTP_POST;
+						http_cfg_file.transfile = TRANS_FILE;
+						trans_file_name_to_make_body (file_name);
+						app_http_start(&http_cfg_file,  (int)len);
+//						delete_a_file (file_name);
+//						DEBUG_INFO ("SEND OFFLINE FILE\r\n");
+					}
+					if (xSemaphoreTake (sent_an_offline_file, 15000) == pdTRUE)
+					{
+						DEBUG_INFO("Delete file %s\r\n", file_name);
+						fatfs_delete_a_file (file_name);
+					}
+				}
+			}
+			for (uint8_t i = 1; i <= month_read; i++)
+			{
+				sprintf (file_name, "0:/offline_test/test%d-%d-%d", i, sDateReadFile.Month, sDateReadFile.Year);
+				if(!fatfs_check_file (file_name))
+				{
+//					len = fatfs_read_file (file_name, (uint8_t *)json_send_to_sever, 1024);
+//					DEBUG_INFO ("READ %u byte \r\n", len);
+					len = fatfs_get_file_size (file_name);
+					DEBUG_INFO ("FILE SIZE : %d \r\n", len);
+					if (len)
+					{
+//						DEBUG_INFO ("json from file: %s\r\n", json_send_to_sever);
+						sprintf(http_cfg_file.url, "%s", "192.168.1.28");
+						http_cfg_file.port = 80;
+						sprintf(http_cfg_file.file, "%s", "/test.txt");
+						http_cfg_file.on_event_cb = (void*)0;
+						http_cfg_file.method = APP_HTTP_POST;
+						http_cfg_file.transfile = TRANS_FILE;
+						trans_file_name_to_make_body (file_name);
+						app_http_start(&http_cfg_file,  (int)len);
+//						send_offline_file = true;
+					}
+					if (xSemaphoreTake (sent_an_offline_file, 15000) == pdTRUE)
+					{
+						DEBUG_INFO("Delete file %s\r\n", file_name);
+						fatfs_delete_a_file (file_name);
+//						}
+					}
+				}
+			}
+
+//			if(!check_file ("offline_file"))
+//			{
+//				len = fatfs_read_file ("offline_file", (uint8_t *)json_send_to_sever, 1024);
+//				if (len)
+//				{
+//					DEBUG_INFO ("json from file: %s\r\n", json_send_to_sever);
+//					sprintf(http_cfg.url, "%s", "dev-api.basato.vn");
+//					http_cfg.port = 80;
+//					sprintf(http_cfg.file, "%s", "/fact/api/firesafe/test-result");
+//					http_cfg.on_event_cb = (void*)0;
+//					http_cfg.method = APP_HTTP_POST;
+//					trans_content_to_body ((uint8_t *) json_send_to_sever, len);
+//					DEBUG_INFO ("SEND");
+//					app_http_start(&http_cfg,  (int)len);
+//					delete_a_file ("offline_file");
+//					DEBUG_INFO ("SEND OFFLINE FILE\r\n");
+//				}
+//			}
+			e_state = ETHERNET_CONNECTED;
+			break;
+		case ETHERNET_CONNECTED:
+			if (!eth_is_cable_connected (&g_netif) )
+			{
+				e_state = NOT_CONNECTED;
+				m_ip_assigned = false;
+			}
+//			if (send_offline_file)
+//			{
+//				for (uint8_t i = 1; i < month_read; i++)
+//				{
+//					sprintf (file_name, "0:/offline_test/test%d-%d-%d", i, sDateReadFile.Month, sDateReadFile.Year);
+//					if(!check_file (file_name))
+//					{
+//						delete_a_file (file_name);
+//					}
+//				}
+//				send_offline_file = false;
+//			}
+			break;
+		default:
+			break;
+		}
+		if (xQueueReceive(httpQueue, &rev_jig_value, 10) == (BaseType_t)1)
+		{
+			len = json_build (rev_jig_value, &(rev_jig_value->test_result), json_send_to_sever);
+			vPortFree(rev_jig_value);
+			DEBUG_INFO ("RECIEVE QUEUE AND FREE PTR NOW \r\n");
+			DEBUG_INFO ("%s\r\n",json_send_to_sever);
+			if (eth_is_cable_connected (&g_netif) )
+			{
+				sprintf(http_cfg.url, "%s", "192.168.1.28");
+				http_cfg.port = 80;
+				sprintf(http_cfg.file, "%s", "/test.txt");
+				http_cfg.on_event_cb = (void*)0;
+				http_cfg.method = APP_HTTP_POST;
+				http_cfg.transfile = TRANS_STRING;
+				trans_content_to_body ((uint8_t *) json_send_to_sever, len);
+				app_http_start(&http_cfg,  (int)len);
+			}
+			else
+			{
+				if (check_file ("offline_test") == 1)
+				{
+					fatfs_create_a_dir ("offline_test");
+				}
+				{
+				DIR dir;
+//				UINT i;
+				fre = f_opendir(&dir, "offline_test");
+				if (fre == FR_OK)
+				{
+					RTC_DateTypeDef sDateWriteFile = {0};
+					HAL_RTC_GetDate (&hrtc, &sDateWriteFile, RTC_FORMAT_BIN);
+					sprintf (file_name, "offline_test/test%d-%d-%d", sDateWriteFile.Date, sDateWriteFile.Month, sDateWriteFile.Year);
+					uint32_t byte = fatfs_get_file_size (file_name);
+					DEBUG_INFO ("NOW HAVE %u BYTE\r\n", byte);
+					uint32_t byte_write = fatfs_write_json_to_a_file_at_pos (file_name, json_send_to_sever, (uint32_t)len, byte);
+
+					if (byte_write == len)
+					{
+						DEBUG_INFO ("WRITE FILE OK \r\n");
+					}
+					else
+					{
+						DEBUG_ERROR ("WRITE FILE ERROR \r\n");
+					}
+
+					f_closedir(&dir);
+				}
+				}
+//				uint32_t byte_write = fatfs_write_to_a_file ("offline_file", json_send_to_sever, (uint32_t)len);
+//				if (byte_write == len)
+//				{
+//					DEBUG_INFO ("WRITE FILE OK \r\n");
+//				}
+//				else
+//				{
+//					DEBUG_ERROR ("WRITE FILE ERROR \r\n");
+//				}
+			}
+			xEventGroupSetBits(m_wdg_event_group, netTaskB);
+		}
+		else
+		{
+			xEventGroupSetBits(m_wdg_event_group, netTaskB);
+		}
+		osDelay (10);
+	}
+}
+//***********************************************************************************************************//
 
 //*********************************** TEST TASK******************************************************//
-
+static uint32_t start_time = 0;
+static bool start_testing = false;
 void testing_task (void *arg)
 {
 	//init min protocol
@@ -923,19 +1195,36 @@ void testing_task (void *arg)
 	for (;;)
 	{
 //		DEBUG_INFO ("ENTER TESTING LOOP \r\n");
-		uint32_t now = HAL_GetTick();
-		uint8_t ch;
-		if (lwrb_read(&m_ringbuffer_host_rx, &ch, 1))
+		if (HAL_GPIO_ReadPin(MODE1_GPIO_Port, MODE1_Pin))//xet trang thai bit gat
 		{
-			min_rx_feed(&m_min_context, &ch, 1);
-		}
-		else
-		{
+			if (xEventGroupWaitBits(m_button_event_group,
+					BIT_EVENT_GROUP_BT_IN_PRESSED,
+					pdTRUE,
+					pdFALSE,
+					0))
+			{
+				start_testing = true;
+				start_time = HAL_GetTick ();
+			}
+			uint32_t now = HAL_GetTick();
+			uint8_t ch;
+			if (((now - start_time) >= 60000) && start_testing)
+			{
+				start_testing = false;
+				ready_send_to_sever = true;
+				start_time = HAL_GetTick ();
+			}
 
-			min_timeout_poll(&m_min_context);
-		}
-		if(1)//HAL_GPIO_ReadPin(MODE1_GPIO_Port, MODE1_Pin) && HAL_GPIO_ReadPin(MODE2_GPIO_Port, MODE2_Pin))//xet trang thai bit gat
-		{
+			if (lwrb_read(&m_ringbuffer_host_rx, &ch, 1))
+			{
+				min_rx_feed(&m_min_context, &ch, 1);
+			}
+			else
+			{
+
+				min_timeout_poll(&m_min_context);
+			}
+
 			if(idle_detect)
 			{
 				idle_detect --;
@@ -1078,7 +1367,6 @@ void testing_task (void *arg)
 //
 //				}
 //			}
-			// THEM TRUONG HOP MACH MAIN KHONG TRUYEN TIN QUA RS232
 
 			if (ready_send_to_sever && (sent_to_sever == false))
 			{
@@ -1109,7 +1397,7 @@ void testing_task (void *arg)
 				memcpy (buff_jig_var->sim_imei, to_send_value->sim_imei, 16);
 				buff_jig_var->peripheral.value = to_send_value->peripheral.value;
 				buff_jig_var->test_result.value = test_res.value;
-
+				buff_jig_var->led_result.led_res = led_detect.led_res;
 //				xQueueSend (httpQueue, &buff_jig_var, 0);
 				DEBUG_WARN ("SEND queue \r\n");
 			}
@@ -1123,6 +1411,7 @@ void testing_task (void *arg)
 			{
 				volTest ();
 				last_vol_tick = now;
+				check_led_status ();
 			}
 		}
 		else
@@ -1130,19 +1419,17 @@ void testing_task (void *arg)
 			DEBUG_VERBOSE ("NOT IN TESTING MODE\r\n");
 		}
 		osDelay (10);
-//			uxBits = xEventGroupWaitBits(m_wdg_event_group,
-//				defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB,
-//										pdTRUE,
-//										pdTRUE,
-//										10);
+			uxBits = xEventGroupWaitBits(m_wdg_event_group,
+				defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB,
+										pdTRUE,
+										pdTRUE,
+										10);
 
-//		 if ((uxBits & (defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB))
-//			 == (defaultTaskB | cdcTaskB | usbTaskB | flashTaskB | netTaskB))
-//		 {
-//			 HAL_IWDG_Refresh(&hiwdg);
-//		 }
-
-
+		 if ((uxBits & (defaultTaskB | cdcTaskB  | netTaskB))
+			 == (defaultTaskB | cdcTaskB | netTaskB))
+		 {
+			 HAL_IWDG_Refresh(&hiwdg);
+		 }
 	}
 }
 //*********************************************************************************************************************//
@@ -1247,7 +1534,7 @@ void flash_task(void *argument)
 
 	for (;;)
 	{
-		if (0)
+		if ((HAL_GPIO_ReadPin (MODE1_GPIO_Port, MODE1_Pin) == 0) && (HAL_GPIO_ReadPin (MODE2_GPIO_Port, MODE2_Pin) == 1))
 		{
 		DEBUG_INFO("ENTER flash LOOP\r\n");
 		if (led_busy_toggle > 10)
@@ -1510,7 +1797,7 @@ void flashbyspi(void)
 		uint32_t now = xTaskGetTickCount();
 		uint32_t retry = 4;
 		// set reset pin to 0
-		HAL_GPIO_WritePin (m_loader_cfg.reset_trigger_port, m_loader_cfg.reset_trigger_pin, GPIO_PIN_RESET);
+		HAL_GPIO_WritePin ((GPIO_TypeDef *)m_loader_cfg.reset_trigger_port, m_loader_cfg.reset_trigger_pin, GPIO_PIN_RESET);
 		// init flash size esp
 		while (m_binary.part.size > 0
 				&& m_binary.firm.size > 0
@@ -1527,25 +1814,25 @@ void flashbyspi(void)
 			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.boot.addr/APP_SPI_FLASH_SECTOR_SIZE));
 			m_binary.boot.data = (uint8_t *)pvPortMalloc (m_binary.boot.size * sizeof(uint8_t));
 			app_spi_flash_write (&m_spi_flash_firm, m_binary.boot.addr, m_binary.boot.data, m_binary.boot.size);
-			vPortFree (m_binary.boot.data);
+			vPortFree ((uint8_t *)m_binary.boot.data);
 			DEBUG_INFO ("FLASHED BOOT FILE\r\n");
 			DEBUG_INFO ("FLASH FIRMWARE FILE BY SPI\r\n");
 			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.firm.addr/APP_SPI_FLASH_SECTOR_SIZE));
 			m_binary.firm.data = (uint8_t *)pvPortMalloc (m_binary.firm.size * sizeof(uint8_t));
 			app_spi_flash_write (&m_spi_flash_firm, m_binary.firm.addr, m_binary.firm.data, m_binary.firm.size);
-			vPortFree (m_binary.firm.data);
+			vPortFree ((uint8_t *)m_binary.firm.data);
 			DEBUG_INFO ("FLASHED FIRMWARE FILE \r\n");
 			DEBUG_INFO ("FLASH OTA FILE BY SPI\r\n");
 			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.ota.addr/APP_SPI_FLASH_SECTOR_SIZE));
 			m_binary.ota.data = (uint8_t *)pvPortMalloc (m_binary.ota.size * sizeof(uint8_t));
 			app_spi_flash_write (&m_spi_flash_firm, m_binary.ota.addr, m_binary.ota.data, m_binary.ota.size);
-			vPortFree (m_binary.ota.data);
+			vPortFree ((uint8_t *)m_binary.ota.data);
 			DEBUG_INFO ("FLASHED OTA FILE \r\n");
 			DEBUG_INFO ("FLASH OTA FILE BY SPI\r\n");
 			app_spi_flash_erase_sector_4k (&m_spi_flash_firm, (uint32_t)(m_binary.part.addr/APP_SPI_FLASH_SECTOR_SIZE));
 			m_binary.part.data = (uint8_t *)pvPortMalloc (m_binary.part.size * sizeof(uint8_t));
 			app_spi_flash_write (&m_spi_flash_firm, m_binary.part.addr, m_binary.part.data, m_binary.part.size);
-			vPortFree (m_binary.part.data);
+			vPortFree ((uint8_t *)m_binary.part.data);
 			DEBUG_INFO ("FLASHED OTA FILE \r\n");
 
 
@@ -1773,6 +2060,38 @@ bool PassTest (jig_value_t * value)
 		return false;
 	}
 	return 0;
+}
+
+
+//copy lien tuc gia tri tu led_detect sang led_detect_final
+// kiem tra sau 3s neu chua dat thi coi nhu la chua dat
+
+void check_led_status(void)
+{
+
+	led_status[LR1] = HAL_GPIO_ReadPin (IN_LR1_GPIO_Port, IN_LR1_Pin);
+	led_status[LR2] = HAL_GPIO_ReadPin (IN_LR2_GPIO_Port, IN_LR2_Pin);
+	led_status[LR3] = HAL_GPIO_ReadPin (IN_LR3_GPIO_Port, IN_LR3_Pin);
+	led_status[LR4] = HAL_GPIO_ReadPin (IN_LR4_GPIO_Port, IN_LR4_Pin);
+	led_status[LR5] = HAL_GPIO_ReadPin (IN_LR5_GPIO_Port, IN_LR5_Pin);
+	led_status[LR6] = HAL_GPIO_ReadPin (IN_LR6_GPIO_Port, IN_LR6_Pin);
+	led_status[LB1] = HAL_GPIO_ReadPin (IN_LB1_GPIO_Port, IN_LB1_Pin);
+	led_status[LB2] = HAL_GPIO_ReadPin (IN_LB2_GPIO_Port, IN_LB2_Pin);
+	led_status[LB3] = HAL_GPIO_ReadPin (IN_LB2_GPIO_Port, IN_LB3_Pin);
+	led_status[LB4] = HAL_GPIO_ReadPin (IN_LB2_GPIO_Port, IN_LB4_Pin);
+	led_status[LB5] = HAL_GPIO_ReadPin (IN_LB2_GPIO_Port, IN_LB5_Pin);
+	led_status[LB6] = HAL_GPIO_ReadPin (IN_LB2_GPIO_Port, IN_LB6_Pin);
+	for (uint8_t i = LR1; i < 6; i++)
+	{
+		if ((led_status [i] == 0) && (led_status [i + 6] == 0))
+		{
+			led_detect.led_res |= (1 << i );
+		}
+		else
+		{
+			led_detect.led_res &= ~(1 << i);
+		}
+	}
 }
 
 /**********************************    BUTTON APP FUNCTION         ******************************************/
@@ -2085,10 +2404,10 @@ int16_t json_build(jig_value_t *value, func_test_t * test, char *json_str)
 	index += sprintf (json_str+index, "\"input3\":%s,",					value->peripheral.name.input2_pass ? "true" : "false");
 	index += sprintf (json_str+index, "\"input4\":%s,",					value->peripheral.name.input3_pass ? "true" : "false");
 	index += sprintf (json_str+index, "\"temperature\":%s,", 			test->result.temper_ok? "true" : "false");
-	index += sprintf (json_str+index, "\"charge\":%s,", 				test->result.charge_ok? "true" : "false");
+//	index += sprintf (json_str+index, "\"charge\":%s,", 				test->result.charge_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"alarmIn\":%s,", 				test->result.alarm_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"faultIn\":%s,", 				test->result.fault_ok? "true" : "false");
-	index += sprintf (json_str+index, "\"sosButton\":%s,", 				test->result.sosButton_ok? "true" : "false");
+//	index += sprintf (json_str+index, "\"sosButton\":%s,", 				test->result.sosButton_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"relay0\":%s,", 				test->result.relay0_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"relay1\":%s,", 				test->result.relay1_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"watchdog\":%s,", 				test->result.test_wd_ok? "true" : "false");
@@ -2096,6 +2415,12 @@ int16_t json_build(jig_value_t *value, func_test_t * test, char *json_str)
 	index += sprintf (json_str+index, "\"v1v8\":%s,", 					test->result.v1v8_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"v3v3\":%s,", 					test->result.v3v3_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"vsys\":%s,", 					test->result.vsys_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"led1\":%s,", 					value->led_result.res.led1_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"led2\":%s,", 					value->led_result.res.led2_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"led3\":%s,", 					value->led_result.res.led3_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"led4\":%s,", 					value->led_result.res.led4_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"led5\":%s,", 					value->led_result.res.led5_ok? "true" : "false");
+	index += sprintf (json_str+index, "\"led6\":%s,", 					value->led_result.res.led6_ok? "true" : "false");
 	index += sprintf (json_str+index, "\"allPassed\":%s}}]", 			allPassed? "true" : "false");
 	return index;
 }
